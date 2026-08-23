@@ -9,7 +9,7 @@
     <Company>Majdata</Company>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
-    <Version>2.1.1</Version>
+    <Version>2.2.0</Version>
     <IsTrimmable>True</IsTrimmable>
     <IsAotCompatible>True</IsAotCompatible>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
