@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 namespace MajSimai.Unmanaged;
 public unsafe class UnmanagedSimaiParser
 {
-    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Parse", CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Parse", CallConvs = new Type[] { typeof(CallConvCdecl) })]
     public static void Parse(char* contentPtr, int contentLen, UnmanagedSimaiParseResult* result)
     {
         var content = Marshal.PtrToStringAnsi((nint)contentPtr, contentLen);
@@ -68,7 +68,7 @@ public unsafe class UnmanagedSimaiParser
             };
         }
     }
-    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Free", CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Free", CallConvs = new Type[] { typeof(CallConvCdecl) })]
     public static bool Free(UnmanagedSimaiParseResult* ptr)
     {
         try
@@ -85,7 +85,7 @@ public unsafe class UnmanagedSimaiParser
             return false;
         }
     }
-    [UnmanagedCallersOnly(EntryPoint = "MajSimai_FreeHGlobal", CallConvs = [typeof(CallConvCdecl)])]
+    [UnmanagedCallersOnly(EntryPoint = "MajSimai_FreeHGlobal", CallConvs = new Type[] { typeof(CallConvCdecl) })]
     public static bool Free(nint ptr)
     {
         try
