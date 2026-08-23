@@ -189,11 +189,12 @@ namespace MajSimai
             {
                 return;
             }
-            var srcPtr = Unsafe.AsPointer(ref MemoryMarshal.GetReference(source));
-            var dstPtr = Unsafe.AsPointer(ref MemoryMarshal.GetReference(dest));
-            var offset = (ulong)(((T*)dstPtr - (T*)srcPtr) * sizeof(T));
-            var srcLen = (ulong)(source.Length * sizeof(T));
-            var dstLen = (ulong)(dest.Length * sizeof(T));
+            ref var srcPtr = ref MemoryMarshal.GetReference(source);
+            ref var dstPtr = ref MemoryMarshal.GetReference(dest);
+            var offset = (ulong)Unsafe.ByteOffset(ref srcPtr,
+                                                  ref dstPtr);
+            var srcLen = (ulong)(source.Length * Unsafe.SizeOf<T>());
+            var dstLen = (ulong)(dest.Length * Unsafe.SizeOf<T>());
             
             if(offset != 0 && (offset < srcLen || ulong.MinValue - offset < dstLen))
             {
