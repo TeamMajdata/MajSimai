@@ -645,6 +645,7 @@ namespace MajSimai
                             case 's':
                             case 'z':
                             case 'w':
+                            case 'K':
                                 isSlide = true;
                                 break;
                             case 'A':
