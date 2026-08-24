@@ -1,0 +1,36 @@
+name: Publish NuGet Package (Trusted)
+
+on:
+  push:
+    tags:
+      - '*'   # triggers on tags like 2.2.1
+
+permissions:
+  id-token: write   # required for OIDC
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x' # adjust if needed
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Build and generate package
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          echo "Building version $VERSION"
+          dotnet build --configuration Release /p:Version=$VERSION
+          dotnet pack --configuration Release --no-build -o ./artifacts /p:Version=$VERSION
+
+      - name: Publish to NuGet (Trusted Publishing)
+        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
