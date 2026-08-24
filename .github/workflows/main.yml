@@ -3,14 +3,14 @@ name: Publish NuGet Package (Trusted)
 on:
   push:
     tags:
-      - '*'   # triggers on tags like 2.2.1
+      - '[0-9]+.[0-9]+.[0-9]+'   # only semantic version tags like 2.2.1
 
 permissions:
   id-token: write   # required for OIDC
   contents: read
 
 jobs:
-  publish:
+  build-and-publish:
     runs-on: ubuntu-latest
 
     steps:
@@ -20,17 +20,25 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x' # adjust if needed
+          dotnet-version: '8.0.x'
 
       - name: Restore dependencies
         run: dotnet restore
 
-      - name: Build and generate package
+      - name: Build and pack
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
           echo "Building version $VERSION"
           dotnet build --configuration Release /p:Version=$VERSION
           dotnet pack --configuration Release --no-build -o ./artifacts /p:Version=$VERSION
 
-      - name: Publish to NuGet (Trusted Publishing)
-        run: dotnet nuget push ./artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate
+      # Get a short-lived NuGet API key via OIDC
+      - name: NuGet login (OIDC → temp API key)
+        uses: NuGet/login@v1
+        id: login
+        with:
+          user: ${{ secrets.NUGET_USER }} # your nuget.org username (profile name), not email
+
+      # Push all packages using glob pattern
+      - name: NuGet push
+        run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
