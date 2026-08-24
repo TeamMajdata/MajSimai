@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading.Tasks;
 
 namespace MajSimai.Unmanaged;
+
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiNote
 {
@@ -25,6 +26,7 @@ internal unsafe struct UnmanagedSimaiNote
     public bool isHanabi;
     public bool isSlideBreak;
     public bool isSlideNoHead;
+    public bool isTapHeadSlide;
     public bool isMine;
     public bool isMineSlide;
     public bool usingSV;

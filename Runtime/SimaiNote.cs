@@ -15,6 +15,7 @@ namespace MajSimai
         public bool IsHanabi { get; set; }
         public bool IsSlideBreak { get; set; }
         public bool IsSlideNoHead { get; set; }
+        public bool IsTapHeadSlide { get; set; }
         public bool IsMine { get; set; } //炸弹音符
         public bool IsMineSlide { get; set; }
         public bool UsingSV { get; set; }
@@ -29,7 +30,7 @@ namespace MajSimai
         internal unsafe MajSimai.Unmanaged.UnmanagedSimaiNote ToUnmanaged()
         {
             var rawContentPtr = (char*)null;
-            if(!string.IsNullOrEmpty(RawContent))
+            if (!string.IsNullOrEmpty(RawContent))
             {
                 rawContentPtr = (char*)Marshal.StringToHGlobalAnsi(RawContent);
             }
@@ -52,6 +53,7 @@ namespace MajSimai
                 isMineSlide = IsMineSlide,
                 usingSV = UsingSV,
                 isSlideNoHead = IsSlideNoHead,
+                isTapHeadSlide = IsTapHeadSlide,
                 touchArea = TouchArea,
 
                 rawContent = rawContentPtr,

@@ -41,7 +41,7 @@ namespace MajSimai
                 }
                 var tagCount = noteContent.Count('/');
                 var rentedArray = ArrayPool<Range>.Shared.Rent(tagCount + 1);
-                
+
                 try
                 {
                     var ranges = rentedArray.AsSpan(0, tagCount + 1);
@@ -54,7 +54,7 @@ namespace MajSimai
                             var range = ranges[i];
                             var noteText = noteContent[range];
 
-                            if(noteText.IsEmpty)
+                            if (noteText.IsEmpty)
                             {
                                 continue;
                             }
@@ -99,7 +99,7 @@ namespace MajSimai
                     ArrayPool<Range>.Shared.Return(rentedArray, true);
                 }
             }
-            catch(Exception e)
+            catch (Exception e)
             {
                 Debug.WriteLine(e.ToString());
                 return;
@@ -110,7 +110,7 @@ namespace MajSimai
         {
             Span<Range> ranges = stackalloc Range[content.Count('*') + 1];
             _ = content.Split(ranges, '*', StringSplitOptions.RemoveEmptyEntries);
-            if (TryGetSingleNote(timing, bpm, content[ranges[0]],out var note1))
+            if (TryGetSingleNote(timing, bpm, content[ranges[0]], out var note1))
             {
                 buffer.Add(note1);
             }
@@ -152,7 +152,7 @@ namespace MajSimai
             }
         }
 
-        internal static bool TryGetSingleNote(double timing, double bpm, zString noteText,[NotNullWhen(true)] out SimaiNote? outSimaiNote)
+        internal static bool TryGetSingleNote(double timing, double bpm, zString noteText, [NotNullWhen(true)] out SimaiNote? outSimaiNote)
         {
             outSimaiNote = default;
             Span<char> noteTextCopy = stackalloc char[noteText.Length];
@@ -167,11 +167,11 @@ namespace MajSimai
                 simaiNote.TouchArea = noteTextCopy[0];
                 if (simaiNote.TouchArea != 'C')
                 {
-                    if(noteTextCopy.Length < 2)
+                    if (noteTextCopy.Length < 2)
                     {
                         return false;
                     }
-                    else if(int.TryParse(noteTextCopy.Slice(1, 1), out var startPosition))
+                    else if (int.TryParse(noteTextCopy.Slice(1, 1), out var startPosition))
                     {
                         simaiNote.StartPosition = startPosition;
                     }
@@ -180,7 +180,7 @@ namespace MajSimai
                         return false;
                     }
                 }
-                else 
+                else
                 {
                     simaiNote.StartPosition = 8;
                 }
@@ -206,7 +206,7 @@ namespace MajSimai
                 if (detectResult.IsTouchNote)
                 {
                     simaiNote.Type = SimaiNoteType.TouchHold;
-                    if(NoteHelper.TryGetHoldTimeFromBeats(bpm, noteTextCopy, out var holdTime))
+                    if (NoteHelper.TryGetHoldTimeFromBeats(bpm, noteTextCopy, out var holdTime))
                     {
                         simaiNote.HoldTime = holdTime;
                     }
@@ -242,7 +242,7 @@ namespace MajSimai
             if (detectResult.IsSlide)
             {
                 simaiNote.Type = SimaiNoteType.Slide;
-                if(!NoteHelper.TryGetSlideParams(bpm, noteTextCopy, out var slideParams))
+                if (!NoteHelper.TryGetSlideParams(bpm, noteTextCopy, out var slideParams))
                 {
                     return false;
                 }
@@ -272,6 +272,7 @@ namespace MajSimai
             //starHead
             simaiNote.IsForceStar = detectResult.IsForceStar;
             simaiNote.IsFakeRotate = detectResult.IsFakeRotate;
+            simaiNote.IsTapHeadSlide = detectResult.IsTapHeadSlide;
 
             // mine
             simaiNote.IsMine = detectResult.IsMine;
@@ -285,7 +286,7 @@ namespace MajSimai
             return true;
         }
 
-        
+
         static class NoteHelper
         {
             public static bool TryGetSlideParams(double bpm, zString noteText, out (double slideWaitTime, double slideTime) outParams)
@@ -299,7 +300,7 @@ namespace MajSimai
                 var startIndex = 0;
                 Span<Range> ranges = stackalloc Range[4];
                 startIndex = noteText[nextStartIndex..].IndexOf('[');
-                if(startIndex == -1)
+                if (startIndex == -1)
                 {
                     return false;
                 }
@@ -460,7 +461,7 @@ namespace MajSimai
             [MethodImpl(MethodImplOptions.AggressiveInlining)]
             public static bool IsTouchNote(zString noteText)
             {
-                if(noteText.IsEmpty)
+                if (noteText.IsEmpty)
                 {
                     return false;
                 }
@@ -492,7 +493,7 @@ namespace MajSimai
                 Span<Range> ranges = stackalloc Range[2];
                 var tagCount = holdParamsBody.Split(ranges, '#', StringSplitOptions.None);
 
-                switch(tagCount)
+                switch (tagCount)
                 {
                     case 1: // 2h[8:3]
                         return TryGetTimeFromRatio(bpm, holdParamsBody, out time);
@@ -563,6 +564,7 @@ namespace MajSimai
                 public readonly bool IsSlide;               // -^v<>Vpqszw
                 public readonly bool IsSlideNoHead;         // !
                 public readonly bool IsSlideNoHeadAndDelay; // ?
+                public readonly bool IsTapHeadSlide;        // @
                 public readonly bool IsEx;                  // x
                 public readonly bool IsForceStar;           // $
                 public readonly bool IsFakeRotate;          // $$
@@ -580,6 +582,7 @@ namespace MajSimai
                                 bool isSlide,
                                 bool isSlideNoHead,
                                 bool isSlideNoHeadAndDelay,
+                                bool isTapHeadSlide,
                                 bool isEx,
                                 bool isForceStar,
                                 bool isFakeRotate,
@@ -596,6 +599,7 @@ namespace MajSimai
                     IsSlide = isSlide;
                     IsSlideNoHead = isSlideNoHead;
                     IsSlideNoHeadAndDelay = isSlideNoHeadAndDelay;
+                    IsTapHeadSlide = isTapHeadSlide;
                     IsEx = isEx;
                     IsForceStar = isForceStar;
                     IsFakeRotate = isFakeRotate;
@@ -607,7 +611,7 @@ namespace MajSimai
 
                 public static NoteFlag Detect(zString noteContent, Span<char> dst)
                 {
-                    if(noteContent.IsEmpty)
+                    if (noteContent.IsEmpty)
                     {
                         return default;
                     }
@@ -620,6 +624,7 @@ namespace MajSimai
                     var isSlide = false;
                     var isSlideNoHead = false;
                     var isSlideNoHeadAndDelay = false;
+                    var isTapHeadSlide = false;
                     var isEx = false;
                     var isForceStar = false;
                     var isFakeRotate = false;
@@ -673,6 +678,9 @@ namespace MajSimai
                             case '?':
                                 isSlideNoHeadAndDelay = true;
                                 continue;
+                            case '@':
+                                isTapHeadSlide = true;
+                                continue;
                             case '$':
                                 forceStarTagCount++;
                                 continue;
@@ -682,9 +690,9 @@ namespace MajSimai
                                     {
                                         continue;
                                     }
-                                    if(isSlide)
+                                    if (isSlide)
                                     {
-                                        if(i != noteContent.Length - 1) // 1-3b[8:1]
+                                        if (i != noteContent.Length - 1) // 1-3b[8:1]
                                         {
                                             isBreakSlide |= noteContent[i + 1] == '[';
                                         }
@@ -737,6 +745,7 @@ namespace MajSimai
                                         isSlide,
                                         isSlideNoHead,
                                         isSlideNoHeadAndDelay,
+                                        isTapHeadSlide,
                                         isEx,
                                         isForceStar,
                                         isFakeRotate,
