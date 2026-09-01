@@ -737,6 +737,12 @@ namespace MajSimai
                     isForceStar = forceStarTagCount > 0;
                     isFakeRotate = forceStarTagCount > 1;
 
+                    if (isSlide)
+                    {
+                        isHold = false;
+                        isTouchNote = false;
+                    }
+
                     return new NoteFlag(isTouchNote,
                                         isBreak,
                                         isBreakSlide,
