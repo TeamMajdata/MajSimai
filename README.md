@@ -97,6 +97,61 @@ var simaiChart = await SimaiParser.ParseChartAsync(fumen);
 
 ```
 
+## Note model (3.0)
+
+Since 3.0, a slide is read as its star head plus its slide paths (issue #12):
+
+- A slide with a head, such as `1-5[8:1]`, becomes a `Tap` note followed by a `Slide` note. The `Tap` is the star
+  head: its `RawContent` is the text before the first slide mark (`1`), and `RelatedNotes` lists its slides.
+- The later parts of a same-head group (`1-3[8:1]*-5[8:1]`) are also listed in the `RelatedNotes` of the head.
+- A slide without a head (`1?-5[8:1]`, `1!-5[8:1]`) is a single `Slide` note.
+- On a `Slide` note, `IsBreak` and `IsMine` describe the slide path (they were `IsSlideBreak` and `IsMineSlide`
+  before 3.0). `IsSlideNoHead` was removed.
+
+Every note also has these flags:
+
+| Property | Meaning |
+| --- | --- |
+| `IsEach` | A slide is an each when its timing point has more than one slide. Any other note is an each when its timing point has more than one note that is not a slide. |
+| `IsStar` | A `Tap` that uses `$`, or that has related slides and does not use `@`. |
+| `IsStarDouble` | A star with related slides whose timing point has more than one slide, not a mine, starting from the same button. |
+
+`SimaiChart.CommaTimings` is created the first time it is read, which saves most of the memory of a parse when it is
+not used.
+
+Everything else is read exactly as MajSimai 2.2.3 read it, including its edge cases.
+
+## Logging
+
+MajSimai writes messages through `SimaiLogger.Current`. The default logger writes `Warning` and `Error` messages to the
+console. A chart that fails to parse does not fail the file: it keeps its text, has no timing points, and is logged as
+an `Error`.
+
+```C#
+// Show everything, including notes that cannot be read
+SimaiLogger.Current = new ConsoleSimaiLogger(SimaiLogLevel.Debug);
+
+// Or forward to your own logger by implementing ISimaiLogger
+```
+
+## Tests
+
+```bash
+dotnet run --project Tests/MajSimai.Tests
+```
+
+The tests compare the parser with the published MajSimai 2.2.3 package (downloaded from nuget.org at restore), on
+unit cases and on generated charts. To also compare every `maidata.txt` of a folder, download the samples and set
+`MAJSIMAI_SAMPLES_DIR`:
+
+```bash
+python tools/download-samples.py "Simai Test Samples"
+MAJSIMAI_SAMPLES_DIR="Simai Test Samples" dotnet run --project Tests/MajSimai.Tests -- -class "*SampleEquivalenceTests"
+```
+
+Set `MAJSIMAI_BENCHMARK=1` as well and run `-class "*ParserBenchmarkTests"` in Release to compare the speed of both
+parsers.
+
 ## Build
 
 If you want to compile MajSimai yourself, please make sure that `dotnet` is installed on your computer.
@@ -133,7 +188,8 @@ If you want to compile native library, you need to specify the use of AOT.
 dotnet publish -c release /p:PublishAot=true -f net9.0 -r linux-x64
 ```
 
-In the native library, MajSimai will export functions:
+In the native library, MajSimai will export functions (the native note layout changed in 3.0: see
+`Runtime/Unmanaged/UnmanagedSimaiNote.cs`; related notes are indices into the notes of the same timing point):
 
 - `MajSimai!MajSimai_Parse`
 - `MajSimai!MajSimai_Free`

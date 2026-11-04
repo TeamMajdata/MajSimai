@@ -9,7 +9,9 @@
     <Company>Majdata</Company>
     <PackageLicenseExpression>GPL-3.0-or-later</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
-    <Version>2.2.1</Version>
+    <Version>3.0.0</Version>
+    <LangVersion>11</LangVersion>
+    <GenerateDocumentationFile>True</GenerateDocumentationFile>
     <IsTrimmable>True</IsTrimmable>
     <IsAotCompatible>True</IsAotCompatible>
     <AllowUnsafeBlocks>True</AllowUnsafeBlocks>
@@ -19,6 +21,16 @@
 	  <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
 	  <TargetFrameworks>net7.0;net8.0;net9.0</TargetFrameworks>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Remove="Tests\**" />
+    <None Remove="Tests\**" />
+    <EmbeddedResource Remove="Tests\**" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MajSimai.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="System.Runtime.CompilerServices.Unsafe" Version="6.1.2" />

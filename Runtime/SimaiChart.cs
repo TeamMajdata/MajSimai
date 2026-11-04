@@ -1,184 +1,189 @@
-﻿using MajSimai.Utils;
-using System;
-using System.Buffers;
-using System.Collections.Generic;
-using System.Runtime.InteropServices;
-using System.Text;
-namespace MajSimai
+﻿using System;
+using System.Threading;
+using MajSimai.Parsing;
+
+namespace MajSimai;
+
+/// <summary>
+/// One difficulty of a simai file: the chart text and the timing points read from it.
+/// </summary>
+public sealed class SimaiChart
 {
-    public class SimaiChart
+    /// <summary>
+    /// A chart without a level, designer, text or timing points.
+    /// </summary>
+    public static readonly SimaiChart Empty = new(string.Empty,
+                                                  string.Empty,
+                                                  string.Empty,
+                                                  Array.Empty<SimaiTimingPoint>(),
+                                                  Array.Empty<SimaiTimingPoint>());
+
+    /// <summary>
+    /// The timing points that have notes.
+    /// </summary>
+    private readonly SimaiTimingPoint[] _noteTimings;
+
+    /// <summary>
+    /// The values of the comma timing points that are not created yet.
+    /// </summary>
+    private readonly CommaTiming[] _commaData;
+
+    /// <summary>
+    /// The comma timing points, or null until they are first read.
+    /// </summary>
+    private SimaiTimingPoint[]? _commaTimings;
+
+    /// <summary>
+    /// Creates a chart without comma timing points.
+    /// </summary>
+    /// <param name="level">The level text, such as <c>13+</c>.</param>
+    /// <param name="designer">The chart designer.</param>
+    /// <param name="fumen">The chart text.</param>
+    /// <param name="noteTimings">The timing points that have notes; they are copied.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="level"/> or <paramref name="designer"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when a timing point is <see langword="null"/>, or when there are timing points but <paramref name="fumen"/> is empty.</exception>
+    public SimaiChart(string level, string designer, string fumen, ReadOnlySpan<SimaiTimingPoint> noteTimings)
+        : this(level, designer, fumen, noteTimings, ReadOnlySpan<SimaiTimingPoint>.Empty)
     {
-        public string Level { get; }
-        public string Designer { get; }
-        public bool IsEmpty
+    }
+
+    /// <summary>
+    /// Creates a chart.
+    /// </summary>
+    /// <param name="level">The level text, such as <c>13+</c>.</param>
+    /// <param name="designer">The chart designer.</param>
+    /// <param name="fumen">The chart text.</param>
+    /// <param name="noteTimings">The timing points that have notes; they are copied.</param>
+    /// <param name="commaTimings">The timing points of every comma; they are copied.</param>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="level"/> or <paramref name="designer"/> is <see langword="null"/>.</exception>
+    /// <exception cref="ArgumentException">Thrown when a timing point is <see langword="null"/>, or when there are note timing points but <paramref name="fumen"/> is empty.</exception>
+    public SimaiChart(string level,
+                      string designer,
+                      string fumen,
+                      ReadOnlySpan<SimaiTimingPoint> noteTimings,
+                      ReadOnlySpan<SimaiTimingPoint> commaTimings)
+        : this(level, designer, fumen, CopyTimings(noteTimings, nameof(noteTimings)), CopyTimings(commaTimings, nameof(commaTimings)))
+    {
+        if (_noteTimings.Length != 0 && string.IsNullOrEmpty(fumen))
         {
-            get
-            {
-                return _isEmpty;
-            }
+            throw new ArgumentException("A chart with timing points must have a chart text.", nameof(fumen));
         }
-        public string Fumen
+    }
+
+    /// <summary>
+    /// Creates a chart that keeps the given arrays.
+    /// </summary>
+    private SimaiChart(string level, string designer, string? fumen, SimaiTimingPoint[] noteTimings, SimaiTimingPoint[] commaTimings)
+    {
+        Level = level ?? throw new ArgumentNullException(nameof(level));
+        Designer = designer ?? throw new ArgumentNullException(nameof(designer));
+        Fumen = fumen ?? string.Empty;
+        _noteTimings = noteTimings;
+        _commaTimings = commaTimings;
+        _commaData = Array.Empty<CommaTiming>();
+    }
+
+    /// <summary>
+    /// Creates a chart whose comma timing points are created when <see cref="CommaTimings"/> is first read.
+    /// </summary>
+    private SimaiChart(string level, string designer, string fumen, SimaiTimingPoint[] noteTimings, CommaTiming[] commaData)
+    {
+        Level = level ?? throw new ArgumentNullException(nameof(level));
+        Designer = designer ?? throw new ArgumentNullException(nameof(designer));
+        Fumen = fumen ?? string.Empty;
+        _noteTimings = noteTimings;
+        _commaData = commaData;
+        _commaTimings = commaData.Length == 0 ? Array.Empty<SimaiTimingPoint>() : null;
+    }
+
+    /// <summary>
+    /// Gets the level text, such as <c>13+</c>.
+    /// </summary>
+    public string Level { get; }
+
+    /// <summary>
+    /// Gets the chart designer.
+    /// </summary>
+    public string Designer { get; }
+
+    /// <summary>
+    /// Gets the chart text.
+    /// </summary>
+    public string Fumen { get; }
+
+    /// <summary>
+    /// Gets whether the chart has no note timing points.
+    /// </summary>
+    public bool IsEmpty => _noteTimings.Length == 0;
+
+    /// <summary>
+    /// Gets the timing points that have notes, in text order.
+    /// </summary>
+    public ReadOnlySpan<SimaiTimingPoint> NoteTimings => _noteTimings;
+
+    /// <summary>
+    /// Gets the timing points of every comma, plus one for the end of the text.
+    /// </summary>
+    /// <remarks>
+    /// For a parsed chart the timing point objects are created on first access, which is thread safe.
+    /// </remarks>
+    public ReadOnlySpan<SimaiTimingPoint> CommaTimings => _commaTimings ?? CreateCommaTimings();
+
+    /// <summary>
+    /// Creates a parsed chart that keeps the given arrays instead of copying them.
+    /// </summary>
+    /// <param name="level">The level text.</param>
+    /// <param name="designer">The chart designer.</param>
+    /// <param name="fumen">The chart text.</param>
+    /// <param name="noteTimings">The note timing points; the array must not be changed afterwards.</param>
+    /// <param name="commaTimings">The values of the comma timing points; the array must not be changed afterwards.</param>
+    /// <returns>The chart.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="level"/> or <paramref name="designer"/> is <see langword="null"/>.</exception>
+    internal static SimaiChart Create(string level,
+                                      string designer,
+                                      string fumen,
+                                      SimaiTimingPoint[] noteTimings,
+                                      CommaTiming[] commaTimings)
+    {
+        return new SimaiChart(level, designer, fumen, noteTimings, commaTimings);
+    }
+
+    /// <summary>
+    /// Creates the comma timing point objects from their stored values. When several threads race, all of them return
+    /// the array that was stored first.
+    /// </summary>
+    private SimaiTimingPoint[] CreateCommaTimings()
+    {
+        var timings = new SimaiTimingPoint[_commaData.Length];
+        for (var i = 0; i < timings.Length; i++)
         {
-            get
-            {
-                return _fumen;
-            }
+            timings[i] = _commaData[i].ToTimingPoint();
         }
-        public ReadOnlySpan<SimaiTimingPoint> NoteTimings
+
+        return Interlocked.CompareExchange(ref _commaTimings, timings, null) ?? timings;
+    }
+
+    /// <summary>
+    /// Copies timing points and checks that none is null.
+    /// </summary>
+    /// <param name="timings">The timing points.</param>
+    /// <param name="parameterName">The parameter name used in the exception.</param>
+    /// <returns>The copy.</returns>
+    /// <exception cref="ArgumentException">Thrown when a timing point is <see langword="null"/>.</exception>
+    private static SimaiTimingPoint[] CopyTimings(ReadOnlySpan<SimaiTimingPoint> timings, string parameterName)
+    {
+        if (timings.IsEmpty)
         {
-            get
-            {
-                return _noteTimings;
-            }
+            return Array.Empty<SimaiTimingPoint>();
         }
-        public ReadOnlySpan<SimaiTimingPoint> CommaTimings
+        foreach (var timing in timings)
         {
-            get
+            if (timing is null)
             {
-                return _commaTimings;
+                throw new ArgumentException("Timing points cannot be null.", parameterName);
             }
         }
-        public readonly static SimaiChart Empty = new SimaiChart();
 
-
-        readonly bool _isEmpty;
-        readonly string _fumen;
-        readonly SimaiTimingPoint[] _noteTimings;
-        readonly SimaiTimingPoint[] _commaTimings;
-        public SimaiChart(string level, string designer, string fumen,
-                          ReadOnlySpan<SimaiTimingPoint> noteTimings): this(level, designer, fumen, noteTimings, ReadOnlySpan<SimaiTimingPoint>.Empty)
-        { 
-        }
-        public SimaiChart(string level, string designer, string fumen,
-                          ReadOnlySpan<SimaiTimingPoint> noteTimings,
-                          ReadOnlySpan<SimaiTimingPoint> commaTimings)
-        {
-            if(level is null)
-            {
-                throw new ArgumentNullException(nameof(level));
-            }
-            if (designer is null)
-            {
-                throw new ArgumentNullException(nameof(designer));
-            }
-            Level = level;
-            Designer = designer;
-            _noteTimings = Array.Empty<SimaiTimingPoint>();
-            _commaTimings = Array.Empty<SimaiTimingPoint>();
-            var i = 0;
-            var buffer = ArrayPool<SimaiTimingPoint>.Shared.Rent(16);
-            
-            try
-            {
-                foreach (var n in noteTimings)
-                {
-                    if (n is null)
-                    {
-                        throw new ArgumentException(nameof(noteTimings));
-                    }
-                    BufferHelper.EnsureBufferLength(i + 1, ref buffer);
-                    buffer[i++] = n;
-                }
-                if(i != 0)
-                {
-                    if(string.IsNullOrEmpty(fumen))
-                    {
-                        throw new ArgumentException(nameof(fumen));
-                    }
-                    _noteTimings = new SimaiTimingPoint[i];
-                    buffer.AsSpan(0, i).CopyTo(_noteTimings);
-                }
-                i = 0;
-
-                foreach (var n in commaTimings)
-                {
-                    if(n is null)
-                    {
-                        throw new ArgumentException(nameof(commaTimings));
-                    }
-                    BufferHelper.EnsureBufferLength(i + 1, ref buffer);
-                    buffer[i++] = n;
-                }
-                if (i != 0)
-                {
-                    _commaTimings = new SimaiTimingPoint[i];
-                    buffer.AsSpan(0, i).CopyTo(_commaTimings);
-                }
-            }
-            finally
-            {
-                ArrayPool<SimaiTimingPoint>.Shared.Return(buffer);
-            }
-            _fumen = fumen;
-            _isEmpty = _noteTimings.Length == 0;
-        }
-        SimaiChart()
-        {
-            Level = string.Empty;
-            Designer = string.Empty;
-            _fumen = string.Empty;
-            _noteTimings = Array.Empty<SimaiTimingPoint>();
-            _commaTimings = Array.Empty<SimaiTimingPoint>();
-            _isEmpty = true;
-        }
-
-#if NET7_0_OR_GREATER
-        internal unsafe MajSimai.Unmanaged.UnmanagedSimaiChart ToUnmanaged()
-        {
-            var levelPtr = (char*)null;
-            var designerPtr = (char*)null;
-            var fumenPtr = (char*)null;
-            var noteTimingArray = (MajSimai.Unmanaged.UnmanagedSimaiTimingPoint*)null;
-            var commaTimingArray = (MajSimai.Unmanaged.UnmanagedSimaiTimingPoint*)null;
-
-            if (!string.IsNullOrEmpty(Level))
-            {
-                levelPtr = (char*)Marshal.StringToHGlobalAnsi(Level);
-            }
-            if (!string.IsNullOrEmpty(Designer))
-            {
-                designerPtr = (char*)Marshal.StringToHGlobalAnsi(Designer);
-            }
-            if (!string.IsNullOrEmpty(Fumen))
-            {
-                fumenPtr = (char*)Marshal.StringToHGlobalAnsi(Fumen);
-            }
-            if(!NoteTimings.IsEmpty)
-            {
-                noteTimingArray = (MajSimai.Unmanaged.UnmanagedSimaiTimingPoint*)Marshal.AllocHGlobal(sizeof(MajSimai.Unmanaged.UnmanagedSimaiTimingPoint) * NoteTimings.Length);
-                for (var i = 0; i < NoteTimings.Length; i++)
-                {
-                    *(noteTimingArray + i) = NoteTimings[i].ToUnmanaged();
-                }
-            }
-            if (!CommaTimings.IsEmpty)
-            {
-                commaTimingArray = (MajSimai.Unmanaged.UnmanagedSimaiTimingPoint*)Marshal.AllocHGlobal(sizeof(MajSimai.Unmanaged.UnmanagedSimaiTimingPoint) * CommaTimings.Length);
-                for (var i = 0; i < CommaTimings.Length; i++)
-                {
-                    *(commaTimingArray + i) = CommaTimings[i].ToUnmanaged();
-                }
-            }
-            return new()
-            {
-                level = levelPtr,
-                levelLen = Level.Length,
-
-                designer = designerPtr,
-                designerLen = Designer.Length,
-
-                isEmpty = IsEmpty,
-
-                fumen = fumenPtr,
-                fumenLen = Fumen.Length,
-
-                noteTimings = noteTimingArray,
-                noteTimingsLen = NoteTimings.Length,
-
-                commaTimings = commaTimingArray,
-                commaTimingsLen = CommaTimings.Length
-            };
-        }
-#endif
+        return timings.ToArray();
     }
 }

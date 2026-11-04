@@ -1,34 +1,57 @@
-﻿#if NET7_0_OR_GREATER
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection.Emit;
+#if NET7_0_OR_GREATER
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace MajSimai.Unmanaged;
+
+/// <summary>
+/// The native layout of a <see cref="SimaiTimingPoint"/>.
+/// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiTimingPoint
 {
+    /// <summary>The time in seconds.</summary>
     public double timing;
+
+    /// <summary>The BPM in effect.</summary>
     public float bpm;
+
+    /// <summary>The note speed multiplier in effect.</summary>
     public float hSpeed;
+
+    /// <summary>The slide velocity multiplier in effect.</summary>
     public float sVeloc;
+
+    /// <summary>The column in the chart text.</summary>
     public int rawTextPositionX;
+
+    /// <summary>The line in the chart text.</summary>
     public int rawTextPositionY;
+
+    /// <summary>The character offset in the chart text.</summary>
     public int rawTextPosition;
+
+    /// <summary>The number of items in <see cref="notes"/>.</summary>
     public int notesLen;
+
+    /// <summary>The length of <see cref="rawContent"/>.</summary>
     public int rawContentLen;
+
+    /// <summary>Whether the timing point has no notes.</summary>
     public bool isEmpty;
 
+    /// <summary>The notes.</summary>
     public UnmanagedSimaiNote* notes;
+
+    /// <summary>The note text as ANSI characters.</summary>
     public char* rawContent;
 
+    /// <summary>
+    /// Frees the memory owned by the timing point and its notes.
+    /// </summary>
     public void Free()
     {
         Marshal.FreeHGlobal((nint)rawContent);
-        if(notes is not null)
+        if (notes is not null)
         {
             for (var i = 0; i < notesLen; i++)
             {

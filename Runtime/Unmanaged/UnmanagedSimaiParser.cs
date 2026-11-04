@@ -1,16 +1,23 @@
-﻿#if NET7_0_OR_GREATER
+#if NET7_0_OR_GREATER
 using System;
-using System.Collections.Generic;
-using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
+using MajSimai.Logging;
 
 namespace MajSimai.Unmanaged;
-public unsafe class UnmanagedSimaiParser
+
+/// <summary>
+/// The native entry points of MajSimai, exported when the library is published with native AOT.
+/// </summary>
+public static unsafe class UnmanagedSimaiParser
 {
-    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Parse", CallConvs = new Type[] { typeof(CallConvCdecl) })]
+    /// <summary>
+    /// Parses ANSI simai text. Free the result with <c>MajSimai_Free</c>.
+    /// </summary>
+    /// <param name="contentPtr">The simai text as ANSI characters.</param>
+    /// <param name="contentLen">The length of the text.</param>
+    /// <param name="result">Receives the result.</param>
+    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Parse", CallConvs = new[] { typeof(CallConvCdecl) })]
     public static void Parse(char* contentPtr, int contentLen, UnmanagedSimaiParseResult* result)
     {
         var content = Marshal.PtrToStringAnsi((nint)contentPtr, contentLen);
@@ -24,56 +31,52 @@ public unsafe class UnmanagedSimaiParser
         }
         try
         {
-            var simaiFile = SimaiParser.Parse(content, string.Empty);
-            var unmanagedSimaiFile = simaiFile.ToUnmanaged();
-            var unmanagedSimaiFilePtr = (UnmanagedSimaiFile*)Marshal.AllocHGlobal(sizeof(UnmanagedSimaiFile));
-            *unmanagedSimaiFilePtr = unmanagedSimaiFile;
+            var simaiFile = SimaiParser.Parse(content.AsSpan(), string.Empty);
+            var unmanagedFilePtr = (UnmanagedSimaiFile*)Marshal.AllocHGlobal(sizeof(UnmanagedSimaiFile));
+            *unmanagedFilePtr = UnmanagedConverter.ToUnmanaged(simaiFile);
             *result = new()
             {
                 code = UnmanagedSimaiParseResult.CODE_NO_ERROR,
-                simaiFile = unmanagedSimaiFilePtr
+                simaiFile = unmanagedFilePtr
             };
         }
-        catch(Exception e)
+        catch (Exception e)
         {
+            SimaiLogger.Error("MajSimai_Parse failed.", e);
             var errorMsg = e.ToString();
-            var errorMsgPtr = (char*)null;
-            if(!string.IsNullOrEmpty(errorMsg))
+            var line = -1;
+            var column = -1;
+            var errorContent = (string?)null;
+            if (e is InvalidSimaiMarkupException markupException)
             {
-                errorMsgPtr = (char*)Marshal.StringToHGlobalAnsi(errorMsg);
-            }
-            var eLine = -1;
-            var eColumn = -1;
-            var eContentPtr = (char*)null;
-            var eContentLen = 0;
-            if(e is InvalidSimaiMarkupException mE)
-            {
-                eLine = mE.Line;
-                eColumn = mE.Column;
-                if(!string.IsNullOrEmpty(mE.Content))
-                {
-                    eContentPtr = (char*)Marshal.StringToHGlobalAnsi(mE.Content);
-                    eContentLen = mE.Content.Length;
-                }
+                line = markupException.Line;
+                column = markupException.Column;
+                errorContent = markupException.Content;
             }
             *result = new()
             {
                 code = UnmanagedSimaiParseResult.CODE_INTERNAL_ERROR,
-                errorMsgAnsi = errorMsgPtr,
+                errorMsgAnsi = (char*)Marshal.StringToHGlobalAnsi(errorMsg),
                 errorMsgLen = errorMsg.Length,
-                errorAtLine = eLine,
-                errorAtColumn = eColumn,
-                errorContentAnsi = eContentPtr,
-                errorContentLen = eContentLen,
+                errorAtLine = line,
+                errorAtColumn = column,
+                errorContentAnsi = string.IsNullOrEmpty(errorContent) ? null : (char*)Marshal.StringToHGlobalAnsi(errorContent),
+                errorContentLen = errorContent?.Length ?? 0,
             };
         }
     }
-    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Free", CallConvs = new Type[] { typeof(CallConvCdecl) })]
+
+    /// <summary>
+    /// Frees a result returned by <c>MajSimai_Parse</c>.
+    /// </summary>
+    /// <param name="ptr">The result.</param>
+    /// <returns><see langword="true"/> when the result was freed.</returns>
+    [UnmanagedCallersOnly(EntryPoint = "MajSimai_Free", CallConvs = new[] { typeof(CallConvCdecl) })]
     public static bool Free(UnmanagedSimaiParseResult* ptr)
     {
         try
         {
-            if(ptr is null)
+            if (ptr is null)
             {
                 return false;
             }
@@ -85,12 +88,18 @@ public unsafe class UnmanagedSimaiParser
             return false;
         }
     }
-    [UnmanagedCallersOnly(EntryPoint = "MajSimai_FreeHGlobal", CallConvs = new Type[] { typeof(CallConvCdecl) })]
+
+    /// <summary>
+    /// Frees memory allocated by MajSimai with <see cref="Marshal.AllocHGlobal(int)"/>.
+    /// </summary>
+    /// <param name="ptr">The memory.</param>
+    /// <returns><see langword="true"/> when the memory was freed.</returns>
+    [UnmanagedCallersOnly(EntryPoint = "MajSimai_FreeHGlobal", CallConvs = new[] { typeof(CallConvCdecl) })]
     public static bool Free(nint ptr)
     {
         try
         {
-            if(ptr == 0)
+            if (ptr == 0)
             {
                 return false;
             }
