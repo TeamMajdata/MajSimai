@@ -10,6 +10,7 @@
     <IsTestProject>true</IsTestProject>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <RootNamespace>MajSimai.Tests</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <!-- MajSimai 2.2.3 is the published build of the parser before the 3.0 refactor (commit fdb2a3e). -->
     <LegacyMajSimaiVersion>2.2.3</LegacyMajSimaiVersion>
     <LegacyMajSimaiAssembly>$(NuGetPackageRoot)lingfeng-bbben.majsimai\$(LegacyMajSimaiVersion)\lib\net8.0\MajSimai.dll</LegacyMajSimaiAssembly>

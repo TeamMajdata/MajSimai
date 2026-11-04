@@ -18,7 +18,14 @@ namespace MajSimai.Tests.Legacy;
 /// </remarks>
 internal sealed class LegacyNormalizer
 {
+    /// <summary>
+    /// The number of headless slides whose head flags were dropped.
+    /// </summary>
     private long _headlessSlideHeadFlags;
+
+    /// <summary>
+    /// The number of notes that are not slides whose <c>IsSlideNoHead</c> was cleared.
+    /// </summary>
     private long _nonSlideNoHeadFlags;
 
     /// <summary>

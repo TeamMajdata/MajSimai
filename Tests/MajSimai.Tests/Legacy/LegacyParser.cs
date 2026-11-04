@@ -23,54 +23,214 @@ internal sealed class LegacyParser
     /// <returns>The legacy <c>SimaiChart</c> instance.</returns>
     private delegate object ParseChartDelegate(string level, string designer, ReadOnlySpan<char> fumen);
 
+    /// <summary>
+    /// The shared parser, loaded on first use.
+    /// </summary>
     private static readonly Lazy<LegacyParser> s_instance = new(() => new LegacyParser(DefaultAssemblyPath));
 
+    /// <summary>
+    /// Calls <c>SimaiParser.Parse(Stream)</c>.
+    /// </summary>
     private readonly Func<Stream, object> _parseFile;
+
+    /// <summary>
+    /// Calls <c>SimaiParser.ParseChart(string, string, ReadOnlySpan&lt;char&gt;)</c>.
+    /// </summary>
     private readonly ParseChartDelegate _parseChart;
+
+    /// <summary>
+    /// <c>SimaiParser.ParseMetadata(Stream)</c>, which returns a struct.
+    /// </summary>
     private readonly MethodInfo _parseMetadata;
+
+    /// <summary>
+    /// <c>SimaiParser.Deparse(SimaiFile)</c>.
+    /// </summary>
     private readonly MethodInfo _deparse;
 
+    /// <summary>
+    /// Reads <c>fileTitle</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _fileTitle;
+
+    /// <summary>
+    /// Reads <c>fileArtist</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _fileArtist;
+
+    /// <summary>
+    /// Reads <c>fileFinalDesigner</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _fileFinalDesigner;
+
+    /// <summary>
+    /// Reads <c>fileOffset</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, float> _fileOffset;
+
+    /// <summary>
+    /// Reads <c>fileHash</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _fileHash;
+
+    /// <summary>
+    /// Reads <c>fileCharts</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, Array> _fileCharts;
+
+    /// <summary>
+    /// Reads <c>fileCommands</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, IEnumerable> _fileCommands;
 
+    /// <summary>
+    /// Reads <c>commandPrefix</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _commandPrefix;
+
+    /// <summary>
+    /// Reads <c>commandValue</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _commandValue;
 
+    /// <summary>
+    /// Reads <c>chartLevel</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _chartLevel;
+
+    /// <summary>
+    /// Reads <c>chartDesigner</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _chartDesigner;
+
+    /// <summary>
+    /// Reads <c>chartFumen</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _chartFumen;
+
+    /// <summary>
+    /// Reads <c>chartIsEmpty</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, bool> _chartIsEmpty;
+
+    /// <summary>
+    /// Reads <c>chartNoteTimings</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, Array> _chartNoteTimings;
+
+    /// <summary>
+    /// Reads <c>chartCommaTimings</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, Array> _chartCommaTimings;
 
+    /// <summary>
+    /// Reads <c>timingTiming</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, double> _timingTiming;
+
+    /// <summary>
+    /// Reads <c>timingBpm</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, float> _timingBpm;
+
+    /// <summary>
+    /// Reads <c>timingHSpeed</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, float> _timingHSpeed;
+
+    /// <summary>
+    /// Reads <c>timingSVeloc</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, float> _timingSVeloc;
+
+    /// <summary>
+    /// Reads <c>timingRawContent</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _timingRawContent;
+
+    /// <summary>
+    /// Reads <c>timingPositionX</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, int> _timingPositionX;
+
+    /// <summary>
+    /// Reads <c>timingPositionY</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, int> _timingPositionY;
+
+    /// <summary>
+    /// Reads <c>timingPosition</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, int> _timingPosition;
+
+    /// <summary>
+    /// Reads <c>timingSignatureNumerator</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, int> _timingSignatureNumerator;
+
+    /// <summary>
+    /// Reads <c>timingSignatureDenominator</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, int> _timingSignatureDenominator;
+
+    /// <summary>
+    /// Reads <c>timingIsEmpty</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, bool> _timingIsEmpty;
+
+    /// <summary>
+    /// Reads <c>timingNotes</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, Array> _timingNotes;
 
+    /// <summary>
+    /// Reads <c>readNote</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, LegacyNoteView> _readNote;
 
+    /// <summary>
+    /// Reads <c>metadataTitle</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _metadataTitle;
+
+    /// <summary>
+    /// Reads <c>metadataArtist</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _metadataArtist;
+
+    /// <summary>
+    /// Reads <c>metadataFinalDesigner</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _metadataFinalDesigner;
+
+    /// <summary>
+    /// Reads <c>metadataOffset</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, float> _metadataOffset;
+
+    /// <summary>
+    /// Reads <c>metadataHash</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string> _metadataHash;
+
+    /// <summary>
+    /// Reads <c>metadataDesigners</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string[]> _metadataDesigners;
+
+    /// <summary>
+    /// Reads <c>metadataLevels</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string[]> _metadataLevels;
+
+    /// <summary>
+    /// Reads <c>metadataFumens</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, string[]> _metadataFumens;
+
+    /// <summary>
+    /// Reads <c>metadataCommands</c> from a legacy object.
+    /// </summary>
     private readonly Func<object, Array> _metadataCommands;
 
     /// <summary>
@@ -176,6 +336,23 @@ internal sealed class LegacyParser
     }
 
     /// <summary>
+    /// Parses a whole simai file with <c>SimaiParser.Parse(Stream)</c> without reading the result, for benchmarks.
+    /// Markup errors in the metadata are ignored.
+    /// </summary>
+    /// <param name="content">The raw bytes of the file.</param>
+    public void ParseRaw(byte[] content)
+    {
+        using var stream = new MemoryStream(content, false);
+        try
+        {
+            _parseFile(stream);
+        }
+        catch (FormatException)
+        {
+        }
+    }
+
+    /// <summary>
     /// Parses only the metadata of a simai file with <c>SimaiParser.ParseMetadata(Stream)</c>.
     /// </summary>
     /// <param name="content">The raw bytes of the file.</param>
@@ -210,6 +387,11 @@ internal sealed class LegacyParser
         return (string)Unwrap(() => _deparse.Invoke(null, new[] { legacyFile })!);
     }
 
+    /// <summary>
+    /// Runs a reflection call and rethrows the exception of the called method.
+    /// </summary>
+    /// <param name="action">The call.</param>
+    /// <returns>The result of the call.</returns>
     private static T Unwrap<T>(Func<T> action)
     {
         try
@@ -223,6 +405,11 @@ internal sealed class LegacyParser
         }
     }
 
+    /// <summary>
+    /// Reads a legacy file.
+    /// </summary>
+    /// <param name="file">The legacy <c>SimaiFile</c>.</param>
+    /// <returns>The view.</returns>
     private LegacyFileView ReadFile(object file)
     {
         var charts = _fileCharts(file);
@@ -246,6 +433,11 @@ internal sealed class LegacyParser
                                   commands.ToArray());
     }
 
+    /// <summary>
+    /// Reads legacy metadata.
+    /// </summary>
+    /// <param name="metadata">The legacy <c>SimaiMetadata</c>.</param>
+    /// <returns>The view.</returns>
     private LegacyMetadataView ReadMetadata(object metadata)
     {
         var commands = _metadataCommands(metadata);
@@ -267,6 +459,11 @@ internal sealed class LegacyParser
                                       commandViews);
     }
 
+    /// <summary>
+    /// Reads a legacy chart.
+    /// </summary>
+    /// <param name="chart">The legacy <c>SimaiChart</c>.</param>
+    /// <returns>The view.</returns>
     private LegacyChartView ReadChart(object chart)
     {
         return new LegacyChartView(_chartLevel(chart),
@@ -277,6 +474,11 @@ internal sealed class LegacyParser
                                    ReadTimings(_chartCommaTimings(chart)));
     }
 
+    /// <summary>
+    /// Reads legacy timing points.
+    /// </summary>
+    /// <param name="timings">The legacy <c>SimaiTimingPoint</c> array.</param>
+    /// <returns>The views.</returns>
     private LegacyTimingView[] ReadTimings(Array timings)
     {
         var views = new LegacyTimingView[timings.Length];
@@ -306,11 +508,24 @@ internal sealed class LegacyParser
         return views;
     }
 
+    /// <summary>
+    /// Gets a type of the legacy assembly.
+    /// </summary>
+    /// <param name="fullName">The full type name.</param>
+    /// <returns>The type.</returns>
     private Type GetLegacyType(string fullName)
     {
         return Assembly.GetType(fullName, true)!;
     }
 
+    /// <summary>
+    /// Gets a public static method.
+    /// </summary>
+    /// <param name="type">The declaring type.</param>
+    /// <param name="name">The method name.</param>
+    /// <param name="parameterTypes">The parameter types.</param>
+    /// <returns>The method.</returns>
+    /// <exception cref="InvalidOperationException">Thrown when the method does not exist.</exception>
     private static MethodInfo GetMethod(Type type, string name, params Type[] parameterTypes)
     {
         return type.GetMethod(name, BindingFlags.Public | BindingFlags.Static, null, parameterTypes, null)
