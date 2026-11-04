@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <RootNamespace>MajSimai.Tests</RootNamespace>
+    <!-- MajSimai 2.2.3 is the published build of the parser before the 3.0 refactor (commit fdb2a3e). -->
+    <LegacyMajSimaiVersion>2.2.3</LegacyMajSimaiVersion>
+    <LegacyMajSimaiAssembly>$(NuGetPackageRoot)lingfeng-bbben.majsimai\$(LegacyMajSimaiVersion)\lib\net8.0\MajSimai.dll</LegacyMajSimaiAssembly>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit.v3" Version="3.2.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <!-- Downloaded only, never referenced: the legacy assembly has the same name as the project under test and is loaded into its own AssemblyLoadContext. -->
+    <PackageDownload Include="Lingfeng-bbben.MajSimai" Version="[$(LegacyMajSimaiVersion)]" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\MajSimai.csproj" />
+  </ItemGroup>
+
+  <Target Name="CopyLegacyMajSimai" AfterTargets="Build">
+    <Copy SourceFiles="$(LegacyMajSimaiAssembly)" DestinationFolder="$(OutDir)Legacy" SkipUnchangedFiles="true" />
+  </Target>
+
+</Project>
