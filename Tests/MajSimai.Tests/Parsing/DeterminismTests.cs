@@ -28,13 +28,13 @@ public sealed class DeterminismTests
             SimaiChart sequential;
             try
             {
-                sequential = SimaiParser.ParseChart("lv", "des", fumen, false);
+                sequential = SimaiParser.ParseChart("lv", "des", fumen, null, false);
             }
             catch (System.Exception)
             {
                 continue;
             }
-            var parallel = SimaiParser.ParseChart("lv", "des", fumen, true);
+            var parallel = SimaiParser.ParseChart("lv", "des", fumen, null, true);
             Assert.True(parallel.NoteTimings.Length > ChartParser.ParallelThreshold);
             Assert.Null(ModelComparer.FindDifference(sequential, parallel));
             checkedCount++;
@@ -50,10 +50,10 @@ public sealed class DeterminismTests
     public void ConcurrentParses_AreIdentical()
     {
         var fumen = new ChartFuzzer(21).NextChart(2000, 0);
-        var expected = SimaiParser.ParseChart("lv", "des", fumen, false);
+        var expected = SimaiParser.ParseChart("lv", "des", fumen, null, false);
         var results = new SimaiChart[16];
 
-        Parallel.For(0, results.Length, i => results[i] = SimaiParser.ParseChart("lv", "des", fumen, true));
+        Parallel.For(0, results.Length, i => results[i] = SimaiParser.ParseChart("lv", "des", fumen, null, true));
 
         foreach (var result in results)
         {
@@ -71,7 +71,7 @@ public sealed class DeterminismTests
         var checker = new EquivalenceChecker();
         for (var i = 0; i < 20; i++)
         {
-            Assert.Null(checker.CheckChart(fuzzer.NextChart(ChartParser.ParallelThreshold * 3, 0), true));
+            Assert.Null(checker.CheckChart(fuzzer.NextChart(ChartParser.ParallelThreshold * 3, 0), allowParallel: true));
         }
     }
 }

@@ -1,7 +1,8 @@
 namespace MajSimai;
 
 /// <summary>
-/// Thrown when a simai declaration, such as a BPM or HS change, has a value that cannot be read.
+/// Thrown when the structure of a chart is malformed: a declaration such as a BPM or HS change that is not closed or
+/// has a value that cannot be read, or, in strict mode, text that the simai grammar does not define.
 /// </summary>
 public class InvalidSimaiSyntaxException : InvalidSimaiMarkupException
 {

@@ -1,18 +1,36 @@
 using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using MajSimai.Tests.Legacy;
 
 namespace MajSimai.Tests.Equivalence;
 
 /// <summary>
-/// Parses the same input with the MajSimai 2.2.3 parser and the current parser, and reports the first semantic
-/// difference.
+/// Parses the same input with MajSimai 2.2.3 and with the current parser in lenient mode, and reports the first
+/// difference that is not an intended fix.
 /// </summary>
 /// <remarks>
-/// Legacy results are normalized with <see cref="LegacyNormalizer"/>, and current results are projected with
-/// <see cref="LegacyProjection"/>. When either parser throws, both must throw an exception of the same type with the same
-/// message and position.
+/// <para>
+/// The legacy parser gets input rewritten by <see cref="LegacyInput"/>, so the end marker <c>E</c>, a final <c>||</c>
+/// and trimmed field names mean the same in both. Legacy results are normalized with <see cref="LegacyNormalizer"/>, and
+/// current results are projected with <see cref="LegacyProjection"/>.
+/// </para>
+/// <para>
+/// Intended differences that are aligned before comparing: columns (2.x counted them wrongly), the speed of comma timing
+/// points (2.x always used 1), and the slide velocity and time signature of note timing points (2.x used 1 and 0/0; they
+/// are taken from the 2.x comma timing point at the same comma). Timing points with Slide Code are not compared note by
+/// note, because 2.x did not know Slide Code letters.
+/// </para>
+/// <para>
+/// When only the current parser throws an <see cref="InvalidSimaiNoteException"/> or reports an unclosed declaration,
+/// the chart breaks a rule 3.x added on purpose; it is counted in <see cref="IntentionalFailures"/>. Any other failure
+/// in only one parser, or failures with different types or messages, is a difference.
+/// </para>
 /// </remarks>
 internal sealed class EquivalenceChecker
 {
@@ -32,9 +50,14 @@ internal sealed class EquivalenceChecker
     private long _comparedNotes;
 
     /// <summary>
-    /// The number of charts that threw in both parsers.
+    /// The number of timing points with Slide Code whose notes were not compared.
     /// </summary>
-    private long _chartErrors;
+    private long _slideCodeTimings;
+
+    /// <summary>
+    /// The number of charts cut at the end marker for the legacy parser.
+    /// </summary>
+    private long _endMarkerCharts;
 
     /// <summary>
     /// Creates a checker that uses the shared legacy parser.
@@ -60,105 +83,99 @@ internal sealed class EquivalenceChecker
     public long FailedFiles => Interlocked.Read(ref _failedFiles);
 
     /// <summary>
-    /// Gets how many charts of parsed files failed in both parsers.
+    /// Gets how many charts failed in both parsers.
     /// </summary>
     public long FailedCharts => Interlocked.Read(ref _failedCharts);
 
     /// <summary>
-    /// Gets how many legacy notes <see cref="CheckChart"/> compared.
+    /// Gets how many legacy notes were compared.
     /// </summary>
     public long ComparedNotes => Interlocked.Read(ref _comparedNotes);
 
     /// <summary>
-    /// Gets how many charts given to <see cref="CheckChart"/> threw in both parsers.
+    /// Gets how many timing points with Slide Code were not compared note by note.
     /// </summary>
-    public long ChartErrors => Interlocked.Read(ref _chartErrors);
+    public long SlideCodeTimings => Interlocked.Read(ref _slideCodeTimings);
 
     /// <summary>
-    /// Compares the parse of a whole file, its metadata and its deparsed text.
+    /// Gets how many charts had text after an end marker <c>E</c>, or a final <c>||</c>, rewritten for the legacy parser.
+    /// </summary>
+    public long EndMarkerCharts => Interlocked.Read(ref _endMarkerCharts);
+
+    /// <summary>
+    /// Gets the charts with an intended difference, by kind: charts that only the current parser rejects, by the rule
+    /// they break, and charts that are not compared because 2.x lost parts of a long fake each.
+    /// </summary>
+    public ConcurrentDictionary<string, long> IntentionalFailures { get; } = new();
+
+    /// <summary>
+    /// Compares the metadata, every chart and the deparsed text of a file.
     /// </summary>
     /// <param name="content">The raw bytes of the file.</param>
     /// <returns>The first difference, or <see langword="null"/> when both parsers agree.</returns>
     public string? CheckFile(byte[] content)
     {
-        var metadataDifference = CheckMetadata(content);
+        var text = Decode(content);
+        var canonical = Encoding.UTF8.GetBytes(LegacyInput.CanonicalizeFile(text));
+        var metadataDifference = CheckMetadata(content, canonical);
         if (metadataDifference is not null)
         {
             return "Metadata: " + metadataDifference;
         }
-        LegacyFileView? expected = null;
-        object? legacyFile = null;
-        Exception? expectedError = null;
-        try
+        SimaiFile file;
+        using (var stream = new MemoryStream(content, false))
         {
-            expected = Legacy.ParseFile(content, out legacyFile);
+            file = SimaiParser.Parse(stream);
         }
-        catch (Exception e)
+        for (var i = 0; i < file.Charts.Length; i++)
         {
-            expectedError = e;
-        }
-        SimaiFile? actualFile = null;
-        Exception? actualError = null;
-        try
-        {
-            using var stream = new MemoryStream(content, false);
-            actualFile = SimaiParser.Parse(stream);
-        }
-        catch (Exception e)
-        {
-            actualError = e;
-        }
-        if (expectedError is not null || actualError is not null)
-        {
-            var failureDifference = CompareFailures(expectedError, actualError);
-            if (failureDifference is null)
+            var chart = file.Charts[i];
+            if (chart.Fumen.Length == 0)
             {
-                Interlocked.Increment(ref _failedFiles);
+                continue;
             }
-            return failureDifference;
-        }
-        var normalized = expected! with { Charts = Array.ConvertAll(expected!.Charts, Normalizer.Normalize) };
-        var difference = ViewComparer.FindDifference(normalized, LegacyProjection.Project(actualFile!));
-        if (difference is not null)
-        {
-            return difference;
-        }
-        foreach (var chart in actualFile!.Charts)
-        {
-            if (chart.Fumen.Length != 0 && chart.CommaTimings.IsEmpty)
+            var difference = CheckChart(chart.Fumen, chart.Level, chart.Designer, true);
+            if (difference is not null)
             {
-                Interlocked.Increment(ref _failedCharts);
+                return $"Chart {i + 1}: {difference}";
+            }
+            difference = CheckFileChart(chart);
+            if (difference is not null)
+            {
+                return $"Chart {i + 1} in the file: {difference}";
             }
         }
-        var expectedText = Legacy.Deparse(legacyFile!);
-        var actualText = SimaiParser.Deparse(actualFile);
+        var legacyFile = Legacy.ParseFile(canonical, out var legacyObject);
 
-        return expectedText == actualText ? null : "Deparse: the texts differ.";
+        return Legacy.Deparse(legacyObject) == SimaiParser.Deparse(file) || legacyFile.Charts.Length != 7
+            ? null
+            : "Deparse: the texts differ.";
     }
 
     /// <summary>
     /// Compares the metadata of a file.
     /// </summary>
     /// <param name="content">The raw bytes of the file.</param>
+    /// <param name="canonical">The bytes rewritten for the legacy parser.</param>
     /// <returns>The first difference, or <see langword="null"/> when both parsers agree.</returns>
-    public string? CheckMetadata(byte[] content)
+    private string? CheckMetadata(byte[] content, byte[] canonical)
     {
         LegacyMetadataView? expected = null;
         Exception? expectedError = null;
         try
         {
-            expected = Legacy.ParseMetadata(content);
+            expected = Legacy.ParseMetadata(canonical);
         }
         catch (Exception e)
         {
             expectedError = e;
         }
-        LegacyMetadataView? actual = null;
+        SimaiMetadata metadata = default;
         Exception? actualError = null;
         try
         {
             using var stream = new MemoryStream(content, false);
-            actual = LegacyProjection.Project(SimaiParser.ParseMetadata(stream));
+            metadata = SimaiParser.ParseMetadata(stream);
         }
         catch (Exception e)
         {
@@ -166,59 +183,232 @@ internal sealed class EquivalenceChecker
         }
         if (expectedError is not null || actualError is not null)
         {
-            return CompareFailures(expectedError, actualError);
+            var failure = CompareFailures(expectedError, actualError);
+            if (failure is null)
+            {
+                Interlocked.Increment(ref _failedFiles);
+            }
+            return failure;
+        }
+        using (var md5 = MD5.Create())
+        {
+            var hash = Convert.ToBase64String(md5.ComputeHash(content));
+            if (metadata.Hash != hash)
+            {
+                return $"Hash: expected {hash}, actual {metadata.Hash}";
+            }
         }
 
-        return ViewComparer.FindDifference(expected!, actual!);
+        return ViewComparer.FindDifference(expected! with { Hash = metadata.Hash }, LegacyProjection.Project(metadata));
     }
 
     /// <summary>
     /// Compares the parse of one chart text.
     /// </summary>
     /// <param name="fumen">The chart text.</param>
+    /// <param name="level">The level text.</param>
+    /// <param name="designer">The designer.</param>
     /// <param name="allowParallel">Whether the current parser may read notes in parallel.</param>
     /// <returns>The first difference, or <see langword="null"/> when both parsers agree.</returns>
-    public string? CheckChart(string fumen, bool allowParallel = true)
+    public string? CheckChart(string fumen, string level = "lv", string designer = "des", bool allowParallel = true)
     {
+        var canonical = LegacyInput.CanonicalizeChart(fumen, out var paddedComment);
+        if (canonical != fumen)
+        {
+            Interlocked.Increment(ref _endMarkerCharts);
+        }
+        if (canonical.Trim().Length == 0)
+        {
+            return CheckEndOnlyChart(fumen, level, designer);
+        }
         LegacyChartView? expected = null;
         Exception? expectedError = null;
         try
         {
-            expected = Legacy.ParseChart("lv", "des", fumen);
+            expected = Legacy.ParseChart(level, designer, canonical);
         }
         catch (Exception e)
         {
             expectedError = e;
         }
-        LegacyChartView? actual = null;
+        SimaiChart? chart = null;
         Exception? actualError = null;
         try
         {
-            actual = LegacyProjection.Project(SimaiParser.ParseChart("lv", "des", fumen, allowParallel));
+            chart = SimaiParser.ParseChart(level, designer, fumen, null, allowParallel);
         }
         catch (Exception e)
         {
             actualError = e;
         }
+        if (actualError is not null && expectedError is null && IsIntentional(actualError))
+        {
+            IntentionalFailures.AddOrUpdate(Categorize(actualError), 1, (_, count) => count + 1);
+            return null;
+        }
         if (expectedError is not null || actualError is not null)
         {
-            var failureDifference = CompareFailures(expectedError, actualError);
-            if (failureDifference is null)
+            var failure = CompareFailures(expectedError, actualError);
+            if (failure is null)
             {
-                Interlocked.Increment(ref _chartErrors);
+                Interlocked.Increment(ref _failedCharts);
             }
-            return failureDifference;
+            return failure;
+        }
+        if (HasLongFakeEach(fumen))
+        {
+            // 2.x lost the parts of a fake each after the eighth; 3.x keeps them all.
+            IntentionalFailures.AddOrUpdate("fake each with 9 or more parts (not compared)", 1, (_, count) => count + 1);
+            return chart!.NoteTimings.Length >= expected!.NoteTimings.Length ? null : "A long fake each lost parts.";
         }
         foreach (var timing in expected!.NoteTimings)
         {
             Interlocked.Add(ref _comparedNotes, timing.Notes.Length);
         }
+        var normalized = Normalizer.Normalize(expected) with { Fumen = fumen };
+        var actual = LegacyProjection.Project(chart!);
+        Align(ref normalized, ref actual, paddedComment);
 
-        return ViewComparer.FindDifference(Normalizer.Normalize(expected!), actual!);
+        return ViewComparer.FindDifference(normalized, actual);
     }
 
     /// <summary>
-    /// Compares the exceptions of both parsers.
+    /// Checks a chart whose text is only an end marker <c>E</c> and what follows it: 3.x reads no notes and one comma
+    /// timing point at the marker.
+    /// </summary>
+    /// <param name="fumen">The chart text.</param>
+    /// <param name="level">The level text.</param>
+    /// <param name="designer">The designer.</param>
+    /// <returns>The difference, or <see langword="null"/>.</returns>
+    private static string? CheckEndOnlyChart(string fumen, string level, string designer)
+    {
+        var chart = SimaiParser.ParseChart(level, designer, fumen, null, false);
+        var isValid = chart.NoteTimings.IsEmpty &&
+                      chart.CommaTimings.Length == 1 &&
+                      fumen[chart.CommaTimings[0].RawTextPosition] == 'E';
+
+        return isValid ? null : "A chart that starts with the end marker has notes.";
+    }
+
+    /// <summary>
+    /// Gets whether a chart has a fake each with 9 or more parts, which 2.x cut short.
+    /// </summary>
+    /// <param name="fumen">The chart text.</param>
+    /// <returns><see langword="true"/> when a timing point has 8 or more <c>`</c>.</returns>
+    private static bool HasLongFakeEach(string fumen)
+    {
+        return fumen.Split(',').Any(part => part.Count(c => c == '`') >= 8);
+    }
+
+    /// <summary>
+    /// Checks that a chart of a parsed file equals the chart parsed alone, or the empty chart of a failed parse.
+    /// </summary>
+    /// <param name="chart">The chart of the file.</param>
+    /// <returns>The difference, or <see langword="null"/>.</returns>
+    private static string? CheckFileChart(SimaiChart chart)
+    {
+        SimaiChart expected;
+        try
+        {
+            expected = SimaiParser.ParseChart(chart.Level, chart.Designer, chart.Fumen, null, false);
+        }
+        catch (Exception)
+        {
+            return chart.NoteTimings.IsEmpty && chart.CommaTimings.IsEmpty ? null : "The failed chart has timing points.";
+        }
+
+        return ModelComparer.FindDifference(expected, chart);
+    }
+
+    /// <summary>
+    /// Aligns the parts of both results that 3.x changed on purpose, so the rest can be compared.
+    /// </summary>
+    /// <param name="expected">The normalized legacy chart.</param>
+    /// <param name="actual">The projected current chart.</param>
+    /// <param name="paddedComment">Whether a space was added after a final <c>||</c> for the legacy parser.</param>
+    private void Align(ref LegacyChartView expected, ref LegacyChartView actual, bool paddedComment)
+    {
+        var commas = expected.CommaTimings.ToDictionary(t => t.RawTextPosition);
+        var expectedNotes = expected.NoteTimings.Select(t =>
+        {
+            var comma = commas.TryGetValue(t.RawTextPosition, out var value) ? value : t;
+            return t with
+            {
+                RawTextPositionX = 0,
+                SVeloc = comma.SVeloc,
+                SignatureNumerator = comma.SignatureNumerator,
+                SignatureDenominator = comma.SignatureDenominator,
+            };
+        }).ToArray();
+        var expectedCommas = expected.CommaTimings.Select(t => t with { RawTextPositionX = 0, HSpeed = 1 }).ToArray();
+        if (paddedComment && expectedCommas.Length != 0)
+        {
+            var last = expectedCommas[^1];
+            expectedCommas[^1] = last with { RawTextPosition = last.RawTextPosition - 1 };
+        }
+        var actualNotes = actual.NoteTimings.Select(t => t with { RawTextPositionX = 0 }).ToArray();
+        var actualCommas = actual.CommaTimings.Select(t => t with { RawTextPositionX = 0, HSpeed = 1 }).ToArray();
+        for (var i = 0; i < Math.Min(expectedNotes.Length, actualNotes.Length); i++)
+        {
+            if (HasSlideCode(actualNotes[i].RawContent))
+            {
+                Interlocked.Increment(ref _slideCodeTimings);
+                expectedNotes[i] = expectedNotes[i] with { Notes = Array.Empty<LegacyNoteView>() };
+                actualNotes[i] = actualNotes[i] with { Notes = Array.Empty<LegacyNoteView>() };
+            }
+        }
+        expected = expected with { NoteTimings = expectedNotes, CommaTimings = expectedCommas };
+        actual = actual with { NoteTimings = actualNotes, CommaTimings = actualCommas };
+    }
+
+    /// <summary>
+    /// Gets whether a timing point has a note that starts with a button and has a Slide Code letter.
+    /// </summary>
+    /// <param name="rawContent">The note text of the timing point.</param>
+    /// <returns><see langword="true"/> when 3.x reads a Slide Code letter that 2.x did not know.</returns>
+    private static bool HasSlideCode(string rawContent)
+    {
+        foreach (var note in rawContent.Split('/', '*'))
+        {
+            if (note.Length > 1 && char.IsDigit(note[0]) && note.Skip(1).Any(c => c is 'A' or 'B' or 'C' or 'P' or 'Q'))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets whether an exception comes from a rule 3.x added on purpose.
+    /// </summary>
+    /// <param name="error">The exception of the current parser.</param>
+    /// <returns><see langword="true"/> for note errors and unclosed declarations.</returns>
+    private static bool IsIntentional(Exception error)
+    {
+        return error is InvalidSimaiNoteException ||
+               (error is InvalidSimaiSyntaxException && error.Message.Contains("is not closed", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Names the rule an intentional failure breaks.
+    /// </summary>
+    /// <param name="error">The exception.</param>
+    /// <returns>A short category.</returns>
+    private static string Categorize(Exception error)
+    {
+        var message = error.Message;
+        var known = new[]
+        {
+            "has no button or sensor", "touch area letter", "has an empty part", "has ']' before '['",
+            "too many ':' or '#'", "text between the '#'", "is not closed",
+        };
+
+        return known.FirstOrDefault(k => message.Contains(k, StringComparison.Ordinal)) ?? message;
+    }
+
+    /// <summary>
+    /// Compares the exceptions of both parsers by type and message.
     /// </summary>
     /// <param name="expected">The legacy exception, if any.</param>
     /// <param name="actual">The current exception, if any.</param>
@@ -233,9 +423,34 @@ internal sealed class EquivalenceChecker
         {
             return $"Only the legacy parser failed: {expected}";
         }
-        var expectedView = ParseFailureView.FromException(expected);
-        var actualView = ParseFailureView.FromException(actual);
+        var expectedView = ParseFailureView.FromException(expected) with { Line = null, Column = null, Content = null };
+        var actualView = ParseFailureView.FromException(actual) with { Line = null, Column = null, Content = null };
+        if (expectedView == actualView)
+        {
+            return null;
+        }
+        // 2.x reported "Unexpected character" for a declaration too short to close; 3.x reads it and reports its value.
+        // The legacy exception type lives in another load context, so it is matched by name.
+        var isShortDeclaration = expected.GetType().Name == "InvalidSimaiMarkupException" &&
+                                 (expected.Message is "Unexpected character \"(\"" or "Unexpected character \"{\"" or "Unexpected character \"<\"") &&
+                                 actual is InvalidSimaiMarkupException;
+        // 2.x read an unclosed declaration to the end of the text and failed on its value; 3.x reports it as unclosed.
+        var isUnclosedDeclaration = expected.GetType().Name.StartsWith("InvalidSimai", StringComparison.Ordinal) &&
+                                    actual is InvalidSimaiSyntaxException &&
+                                    actual.Message.Contains("is not closed", StringComparison.Ordinal);
 
-        return expectedView == actualView ? null : $"Failures differ: expected {expectedView}, actual {actualView}";
+        return isShortDeclaration || isUnclosedDeclaration ? null : $"Failures differ: expected {expectedView}, actual {actualView}";
+    }
+
+    /// <summary>
+    /// Decodes file bytes the way the parser does: UTF-8, or the encoding of the byte order mark.
+    /// </summary>
+    /// <param name="content">The bytes.</param>
+    /// <returns>The text.</returns>
+    private static string Decode(byte[] content)
+    {
+        using var reader = new StreamReader(new MemoryStream(content, false), Encoding.UTF8, true);
+
+        return reader.ReadToEnd();
     }
 }

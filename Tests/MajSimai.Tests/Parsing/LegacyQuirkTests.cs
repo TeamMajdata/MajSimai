@@ -1,15 +1,13 @@
 using System;
-using System.Buffers;
 using System.Globalization;
 using System.Linq;
-using System.Threading;
 using Xunit;
 using static MajSimai.Tests.ChartHelper;
 
 namespace MajSimai.Tests.Parsing;
 
 /// <summary>
-/// Tests the MajSimai 2.x behaviors that 3.x keeps on purpose, so existing charts are read the same way.
+/// Tests the MajSimai 2.x behaviors that 3.x keeps in lenient mode, so existing charts are read the same way.
 /// </summary>
 public sealed class LegacyQuirkTests
 {
@@ -18,113 +16,14 @@ public sealed class LegacyQuirkTests
     /// </summary>
     /// <param name="fumen">The chart text.</param>
     [Theory]
-    [InlineData("(120){4}1h[8:1:2],1-5[3##60#4:1#9],")]
-    [InlineData("(120){4}1`1`1`1`1`1`1`1`1`1,1`1`1`1`1`1`1`1`1`1`1`1`1`1`1`1`1`1,")]
-    [InlineData("(120){4}3-5[8:1]*,1/b/2,1/2h]4:1[/3,2]x[h/3,1/1-5/2,18,1(120)2,1,2")]
-    [InlineData("(120){4}E,1-5b[8:1],1-5[8:1]b,1-b5[8:1],12E,")]
-    [InlineData("(120)1,\n||x\n2,")]
-    [InlineData("(120)<SV*0.5>||s3/4\n1,")]
-    [InlineData("1,||")]
-    public void Quirks_MatchLegacyParser(string fumen)
+    [InlineData("(120){4}18,1(120)2,1/1-5/2,1-b5[8:1],1-5b[8:1],1-5[8:1]b,1,2")]
+    [InlineData("(120){4}1`2`3,1h,Ch,1h[a:b],1?-5[8:1]*-3[8:1],1x*-5[8:1],")]
+    [InlineData("(120)<SV*0.5>||s3/4/5\n1,||sx/y\n2,")]
+    [InlineData("(120){4}51Q,8Q,9,0,B9,1f,")]
+    [InlineData("(1E+02)<HS*NaN>1,2,")]
+    public void KeptBehaviors_MatchLegacyParser(string fumen)
     {
-        Assert.Null(new MajSimai.Tests.Equivalence.EquivalenceChecker().CheckChart(fumen));
-    }
-
-    /// <summary>
-    /// Ratio: ignores text after second colon.
-    /// </summary>
-    [Fact]
-    public void Ratio_IgnoresTextAfterSecondColon()
-    {
-        Assert.Equal(Notes("1h[8:1]")[0].HoldTime, Notes("1h[8:1:2]")[0].HoldTime);
-    }
-
-    /// <summary>
-    /// Slide bracket: reads only four hash parts.
-    /// </summary>
-    [Fact]
-    public void SlideBracket_ReadsOnlyFourHashParts()
-    {
-        // [3##60#4:1#9] keeps the parts 3, "", 60 and 4:1.
-        Assert.Equal(Notes("1-5[3##60#4:1]")[1].SlideTime, Notes("1-5[3##60#4:1#9]")[1].SlideTime);
-    }
-
-    /// <summary>
-    /// Fake each: capacity depends on the rented array.
-    /// </summary>
-    [Fact]
-    public void FakeEach_CapacityDependsOnTheRentedArray()
-    {
-        static int ExpectedParts(int separators)
-        {
-            var rented = ArrayPool<Range>.Shared.Rent(separators + 1);
-            var capacity = rented.Length - (separators + 1);
-            ArrayPool<Range>.Shared.Return(rented);
-            return Math.Min(capacity, separators + 1);
-        }
-
-        for (var separators = 1; separators <= 20; separators++)
-        {
-            var text = string.Join("`", Enumerable.Repeat("1", separators + 1));
-            var chart = Chart(text + ",");
-
-            Assert.Equal(ExpectedParts(separators), chart.NoteTimings.Length);
-        }
-    }
-
-    /// <summary>
-    /// Trailing star: adds a tap on the head button.
-    /// </summary>
-    [Fact]
-    public void TrailingStar_AddsATapOnTheHeadButton()
-    {
-        var notes = Notes("3-5[8:1]*");
-
-        Assert.Equal(new[] { SimaiNoteType.Tap, SimaiNoteType.Slide, SimaiNoteType.Tap }, notes.Select(n => n.Type));
-        Assert.Equal(3, notes[2].StartPosition);
-        Assert.Empty(notes[2].RelatedNotes);
-    }
-
-    /// <summary>
-    /// Empty note after markers: drops the rest of the timing point.
-    /// </summary>
-    [Fact]
-    public void EmptyNoteAfterMarkers_DropsTheRestOfTheTimingPoint()
-    {
-        var notes = Notes("1/b/2");
-
-        Assert.Equal(1, Assert.Single(notes).StartPosition);
-    }
-
-    /// <summary>
-    /// Reversed hold brackets: drop the rest of the timing point.
-    /// </summary>
-    [Fact]
-    public void ReversedHoldBrackets_DropTheRestOfTheTimingPoint()
-    {
-        var notes = Notes("1/2h]4:1[/3");
-
-        Assert.Equal(1, Assert.Single(notes).StartPosition);
-    }
-
-    /// <summary>
-    /// Reversed brackets: on short hold are ignored.
-    /// </summary>
-    [Fact]
-    public void ReversedBrackets_OnShortHoldAreIgnored()
-    {
-        Assert.Equal(2, Notes("2]x[h/3").Length);
-    }
-
-    /// <summary>
-    /// Unreadable note: is skipped.
-    /// </summary>
-    [Fact]
-    public void UnreadableNote_IsSkipped()
-    {
-        var notes = Notes("1/1-5/2");
-
-        Assert.Equal(new[] { 1, 2 }, notes.Select(n => n.StartPosition));
+        Assert.Null(new Equivalence.EquivalenceChecker().CheckChart(fumen));
     }
 
     /// <summary>
@@ -140,7 +39,7 @@ public sealed class LegacyQuirkTests
     }
 
     /// <summary>
-    /// Declarations: drop the note text read so far.
+    /// Declarations: drop the note text read so far in lenient mode.
     /// </summary>
     [Fact]
     public void Declarations_DropTheNoteTextReadSoFar()
@@ -151,7 +50,7 @@ public sealed class LegacyQuirkTests
     }
 
     /// <summary>
-    /// Unterminated last note: is dropped.
+    /// Unterminated last note: is dropped in lenient mode.
     /// </summary>
     [Fact]
     public void UnterminatedLastNote_IsDropped()
@@ -163,75 +62,47 @@ public sealed class LegacyQuirkTests
     }
 
     /// <summary>
-    /// Timing point without notes: is kept.
+    /// Unreadable note: is skipped in lenient mode.
     /// </summary>
     [Fact]
-    public void TimingPointWithoutNotes_IsKept()
+    public void UnreadableNote_IsSkipped()
     {
-        var chart = Chart("E,");
+        var notes = Notes("1/1-5/2");
 
-        var timing = Assert.Single(chart.NoteTimings.ToArray());
-        Assert.Equal("E", timing.RawContent);
-        Assert.True(timing.IsEmpty);
+        Assert.Equal(new[] { 1, 2 }, notes.Select(n => n.StartPosition));
     }
 
     /// <summary>
-    /// Comment at the end: throws index error.
+    /// Unreadable first part: skips its same head group in lenient mode.
     /// </summary>
     [Fact]
-    public void CommentAtTheEnd_ThrowsIndexError()
+    public void UnreadableFirstPart_SkipsItsSameHeadGroup()
     {
-        var error = Assert.Throws<Exception>(() => SimaiParser.ParseChart("1,||"));
+        var notes = Notes("1-5*-3[8:1]/2");
 
-        Assert.Equal("Error at 1,5\n" + new IndexOutOfRangeException().Message, error.Message);
+        Assert.Equal(2, Assert.Single(notes).StartPosition);
     }
 
     /// <summary>
-    /// Column: counts comments and declarations like2x.
+    /// Unreadable hold length: becomes zero in lenient mode.
     /// </summary>
     [Fact]
-    public void Column_CountsCommentsAndDeclarationsLike2x()
+    public void UnreadableHoldLength_BecomesZero()
     {
-        var chart = SimaiParser.ParseChart("(120)1,\n||x\n2,");
+        var hold = Assert.Single(Notes("1h[a:b]"));
 
-        // The opening parenthesis is counted twice.
-        Assert.Equal(7, chart.NoteTimings[0].RawTextPositionX);
-        Assert.Equal(1, chart.NoteTimings[0].RawTextPositionY);
-        Assert.Equal(2, chart.NoteTimings[1].RawTextPositionX);
-        Assert.Equal(3, chart.NoteTimings[1].RawTextPositionY);
+        Assert.Equal(SimaiNoteType.Hold, hold.Type);
+        Assert.Equal(0, hold.HoldTime);
     }
 
     /// <summary>
-    /// Numbers: use invariant culture.
+    /// Short hold: has no length.
     /// </summary>
     [Fact]
-    public void Numbers_UseInvariantCulture()
+    public void ShortHold_HasNoLength()
     {
-        var previous = CultureInfo.CurrentCulture;
-        try
-        {
-            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
-            var chart = SimaiParser.ParseChart("(120.5){4}1,");
-
-            Assert.Equal(120.5f, chart.NoteTimings[0].Bpm);
-            Assert.Equal(0.75, Notes("1h[#0.75]")[0].HoldTime, 12);
-        }
-        finally
-        {
-            CultureInfo.CurrentCulture = previous;
-        }
-    }
-
-    /// <summary>
-    /// Parse: sets invariant default culture.
-    /// </summary>
-    [Fact]
-    public void Parse_SetsInvariantDefaultCulture()
-    {
-        SimaiParser.ParseChart("1,");
-
-        Assert.Same(CultureInfo.InvariantCulture, CultureInfo.DefaultThreadCurrentCulture);
-        Assert.Same(CultureInfo.InvariantCulture, CultureInfo.DefaultThreadCurrentUICulture);
+        Assert.Equal(0, Assert.Single(Notes("1h")).HoldTime);
+        Assert.Equal(0, Assert.Single(Notes("Ch")).HoldTime);
     }
 
     /// <summary>
@@ -248,34 +119,80 @@ public sealed class LegacyQuirkTests
     }
 
     /// <summary>
-    /// Touch area letter anywhere: makes a touch.
+    /// Signature: reads two parts and falls back to four.
     /// </summary>
     [Fact]
-    public void TouchAreaLetterAnywhere_MakesATouch()
+    public void Signature_ReadsTwoPartsAndFallsBackToFour()
     {
-        var touch = Assert.Single(Notes("12E"));
+        var chart = SimaiParser.ParseChart("(120)||s3/4/5\n1,||sx/y\n2,");
 
-        Assert.Equal(SimaiNoteType.Touch, touch.Type);
-        Assert.Equal('1', touch.TouchArea);
-        Assert.Equal(2, touch.StartPosition);
+        Assert.Equal((3, 4), (chart.CommaTimings[0].SignatureNumerator, chart.CommaTimings[0].SignatureDenominator));
+        Assert.Equal((4, 4), (chart.CommaTimings[1].SignatureNumerator, chart.CommaTimings[1].SignatureDenominator));
     }
 
     /// <summary>
-    /// Note timings: use fixed speed and signature values.
+    /// Fake each: parts are a 128th note apart.
     /// </summary>
     [Fact]
-    public void NoteTimings_UseFixedSpeedAndSignatureValues()
+    public void FakeEach_PartsAreA128thNoteApart()
     {
-        var chart = SimaiParser.ParseChart("(120)<SV*0.5>||s3/4\n1,");
-        var note = chart.NoteTimings[0];
-        var comma = chart.CommaTimings[0];
+        var chart = Chart("1`2`3,");
 
-        Assert.Equal(1f, note.SVeloc);
-        Assert.Equal(0, note.SignatureNumerator);
-        Assert.Equal(0, note.SignatureDenominator);
-        Assert.Equal(0.5f, comma.SVeloc);
-        Assert.Equal(1f, comma.HSpeed);
-        Assert.Equal(3, comma.SignatureNumerator);
-        Assert.Equal(4, comma.SignatureDenominator);
+        Assert.Equal(1.875 / 120, chart.NoteTimings[1].Timing - chart.NoteTimings[0].Timing, 12);
+        Assert.Equal(1.875 / 120 * 2, chart.NoteTimings[2].Timing - chart.NoteTimings[0].Timing, 12);
+    }
+
+    /// <summary>
+    /// Ratio: uses the BPM of the bracket.
+    /// </summary>
+    [Fact]
+    public void Ratio_UsesTheBpmOfTheBracket()
+    {
+        Assert.Equal(1.0, Notes("1h[60#4:1]")[0].HoldTime, 12);
+    }
+
+    /// <summary>
+    /// Numbers: use the invariant culture and allow exponents and NaN.
+    /// </summary>
+    [Fact]
+    public void Numbers_UseInvariantCultureAndAllowExponentsAndNaN()
+    {
+        var previous = CultureInfo.CurrentCulture;
+        try
+        {
+            CultureInfo.CurrentCulture = new CultureInfo("de-DE");
+            var chart = SimaiParser.ParseChart("(120.5){4}1,(1E+02)<HS*NaN>2,");
+
+            Assert.Equal(120.5f, chart.NoteTimings[0].Bpm);
+            Assert.Equal(100f, chart.NoteTimings[1].Bpm);
+            Assert.True(float.IsNaN(chart.NoteTimings[1].HSpeed));
+            Assert.Equal(0.75, Notes("1h[#0.75]")[0].HoldTime, 12);
+        }
+        finally
+        {
+            CultureInfo.CurrentCulture = previous;
+        }
+    }
+
+    /// <summary>
+    /// Buttons and sensors: outside the range are read in lenient mode.
+    /// </summary>
+    [Fact]
+    public void ButtonsAndSensorsOutsideTheRange_AreReadInLenientMode()
+    {
+        Assert.Equal(9, Assert.Single(Notes("9")).StartPosition);
+        Assert.Equal(9, Assert.Single(Notes("B9")).StartPosition);
+    }
+
+    /// <summary>
+    /// Button letters: without K are plain text.
+    /// </summary>
+    [Fact]
+    public void ButtonLettersWithoutK_ArePlainText()
+    {
+        var tap = Assert.Single(Notes("51Q"));
+
+        Assert.Equal(SimaiNoteType.Tap, tap.Type);
+        Assert.Equal("51Q", tap.RawContent);
     }
 }

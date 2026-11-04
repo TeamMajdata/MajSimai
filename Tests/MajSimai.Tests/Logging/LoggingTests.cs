@@ -93,12 +93,32 @@ public sealed class LoggingTests
         var logger = new CapturingLogger(SimaiLogLevel.Debug);
         Use(logger, () =>
         {
-            SimaiParser.ParseChart("(120)1-5/2,1/b/3,9*-x,");
+            SimaiParser.ParseChart("(120)1-5/2,1-b5[8:1],9*-x,");
 
             var messages = logger.Entries.Where(e => e.Level == SimaiLogLevel.Debug).Select(e => e.Message).ToArray();
-            Assert.Contains(messages, m => m.Contains("Cannot parse note from text: \"1-5\""));
-            Assert.Contains(messages, m => m.Contains("Stopped reading timing point \"1/b/3\""));
-            Assert.Contains(messages, m => m.Contains("Cannot parse slide from text: \"9-x\""));
+            Assert.Contains(messages, m => m.Contains("Cannot read the note \"1-5\""));
+            Assert.Contains(messages, m => m.Contains("has no effect") && m.Contains("SM207"));
+            Assert.Contains(messages, m => m.Contains("Cannot read the slide \"9-x\""));
+        });
+    }
+
+    /// <summary>
+    /// Dropped text: is logged as a warning.
+    /// </summary>
+    [Fact]
+    public void DroppedText_IsLoggedAsAWarning()
+    {
+        var logger = new CapturingLogger(SimaiLogLevel.Warning);
+        Use(logger, () =>
+        {
+            SimaiParser.ParseChart("(120)1(120)2,3,E,4,5");
+            SimaiParser.ParseMetadata("&broken".AsSpan(), string.Empty);
+
+            var messages = logger.Entries.Select(e => e.Message).ToArray();
+            Assert.Contains(messages, m => m.Contains("is cut off by a declaration"));
+            Assert.Contains(messages, m => m.Contains("after the end marker"));
+            Assert.Contains(messages, m => m.Contains("has no '='"));
+            Assert.All(logger.Entries, e => Assert.Equal(SimaiLogLevel.Warning, e.Level));
         });
     }
 

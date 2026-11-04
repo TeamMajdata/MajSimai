@@ -4,8 +4,8 @@ using System.Text;
 namespace MajSimai.Tests.Equivalence;
 
 /// <summary>
-/// Generates random chart texts that mix valid simai with the malformed input the parser must handle the same way as
-/// MajSimai 2.x.
+/// Generates random chart texts: mostly text that MajSimai 3.x reads without errors, including undefined text that the
+/// lenient mode tolerates, with malformed text mixed in at a chosen rate.
 /// </summary>
 internal sealed class ChartFuzzer
 {
@@ -15,19 +15,37 @@ internal sealed class ChartFuzzer
     private static readonly string[] s_slideMarks = { "-", "^", "v", "<", ">", "V", "p", "q", "s", "z", "w", "pp", "qq", "K" };
 
     /// <summary>
+    /// Slide Code segments, written after a start button.
+    /// </summary>
+    private static readonly string[] s_slideCodes = { "A357K1", "P3K6", "Q0K4", "B7K5", "P00000K8", "Q2CP6K5", "B46K1", "Q37K5", "P98CQ49K1", "B2P3K4" };
+
+    /// <summary>
     /// The note markers.
     /// </summary>
     private static readonly string[] s_markers = { "b", "x", "m", "$", "$$", "@", "!", "?", "c", "f", "h" };
 
     /// <summary>
-    /// Valid and malformed duration brackets.
+    /// Hold duration brackets that read, or that the lenient mode tolerates.
+    /// </summary>
+    private static readonly string[] s_holdDurations =
+    {
+        "[8:1]", "[4:3]", "[16:5]", "[150#8:3]", "[#1.5]", "[]", "[:]", "[0:1]", "[8:]", "[a:b]", "[#]", "[ 8:1 ]",
+        "[-8:1]", "[+4:1]", "[1e1#4:1]", "[8:1]]", "[[8:1]",
+    };
+
+    /// <summary>
+    /// Slide duration brackets that read, or that the lenient mode tolerates.
     /// </summary>
     private static readonly string[] s_durations =
     {
-        "[8:1]", "[4:3]", "[16:5]", "[160#8:3]", "[160#2]", "[#1.5]", "[3##1.5]", "[3##8:3]", "[3##160#8:3]",
-        "[1#2#3#4#5]", "[8:1:2]", "[]", "[:]", "[0:1]", "[8:]", "[a:b]", "[#]", "[##]", "[1,000#4:1]", "[ 8:1 ]",
-        "[-8:1]", "[+4:1]", "[1e1#4:1]", "[8:1", "]8:1[", "[8:1]]", "[[8:1]",
+        "[8:1]", "[4:3]", "[16:5]", "[160#8:3]", "[160#2]", "[#1.5]", "[3##1.5]", "[3##8:3]", "[3##160#8:3]", "[]", "[:]",
+        "[0:1]", "[8:]", "[a:b]", "[#]", "[##]", "[ 8:1 ]", "[-8:1]", "[+4:1]", "[1e1#4:1]", "[8:1]]", "[[8:1]",
     };
+
+    /// <summary>
+    /// Duration brackets that are always an error.
+    /// </summary>
+    private static readonly string[] s_malformedDurations = { "[8:1:2]", "[1#2#3#4#5]", "]8:1[", "[3#9#1.5]", "[3##1.5]", "[8:1" };
 
     /// <summary>
     /// Valid declarations and comments.
@@ -49,12 +67,17 @@ internal sealed class ChartFuzzer
     /// <summary>
     /// Characters that may appear anywhere.
     /// </summary>
-    private static readonly string[] s_noise = { " ", "\r", "\n", "\t", "E", ")", "}", ">", "#", "&", "　" };
+    private static readonly string[] s_noise = { " ", "\r", "\n", "\t", ")", "}", ">", "#", "&", "　" };
 
     /// <summary>
     /// The random generator.
     /// </summary>
     private readonly Random _random;
+
+    /// <summary>
+    /// The chance that a token is malformed, which usually fails the chart.
+    /// </summary>
+    private double _malformedChance;
 
     /// <summary>
     /// Creates a fuzzer.
@@ -69,10 +92,12 @@ internal sealed class ChartFuzzer
     /// Generates a chart text.
     /// </summary>
     /// <param name="timingPoints">The approximate number of timing points.</param>
-    /// <param name="malformedChance">The chance that a declaration is malformed, which usually fails the chart.</param>
+    /// <param name="malformedChance">The chance that a declaration, duration or note is malformed, which usually fails
+    /// the chart.</param>
     /// <returns>The chart text.</returns>
-    public string NextChart(int timingPoints, double malformedChance = 0.002)
+    public string NextChart(int timingPoints, double malformedChance = 0.001)
     {
+        _malformedChance = malformedChance;
         var builder = new StringBuilder();
         builder.Append('(').Append(Pick(new[] { "120", "150", "200.5", "97" })).Append(')');
         builder.Append('{').Append(Pick(new[] { "4", "8", "16", "1" })).Append('}');
@@ -80,7 +105,7 @@ internal sealed class ChartFuzzer
         {
             if (Chance(0.08))
             {
-                builder.Append(Chance(malformedChance / 0.08) ? Pick(s_badDeclarations) : Pick(s_declarations));
+                builder.Append(IsMalformed() ? Pick(s_badDeclarations) : Pick(s_declarations));
             }
             if (!Chance(0.15))
             {
@@ -102,7 +127,7 @@ internal sealed class ChartFuzzer
         }
         if (Chance(0.2))
         {
-            builder.Append('E');
+            builder.Append(Chance(0.5) ? "\nE" : "E\n1,2,");
         }
 
         return builder.ToString();
@@ -111,6 +136,7 @@ internal sealed class ChartFuzzer
     /// <summary>
     /// Generates the text of one timing point.
     /// </summary>
+    /// <param name="builder">The chart text.</param>
     private void AppendTimingPoint(StringBuilder builder)
     {
         if (Chance(0.05))
@@ -125,7 +151,7 @@ internal sealed class ChartFuzzer
         {
             if (g > 0)
             {
-                builder.Append(Chance(0.9) ? separator : Pick(new[] { '/', '`', '*' }));
+                builder.Append(IsMalformed() ? '*' : separator);
             }
             AppendGroup(builder);
         }
@@ -152,12 +178,12 @@ internal sealed class ChartFuzzer
                 {
                     AppendSlidePath(builder);
                 }
-                else if (Chance(0.5))
+                else
                 {
-                    AppendMarkers(builder);
+                    builder.Append(Pick(new[] { "b", "h", "$", "x" }));
                 }
             }
-            if (Chance(0.03))
+            if (IsMalformed())
             {
                 builder.Append('*');
             }
@@ -177,7 +203,12 @@ internal sealed class ChartFuzzer
     /// <param name="builder">The chart text.</param>
     private void AppendButtonNote(StringBuilder builder)
     {
-        builder.Append(Chance(0.97) ? (char)('1' + _random.Next(8)) : Pick(new[] { '0', '9', 'x', 'b' }));
+        if (IsMalformed())
+        {
+            builder.Append(Pick(new[] { "b", "x", "1E", "2C", "3h]4:1[" }));
+            return;
+        }
+        builder.Append(Chance(0.97) ? (char)('1' + _random.Next(8)) : Pick(new[] { '0', '9' }));
         AppendMarkers(builder);
         if (Chance(0.2))
         {
@@ -185,7 +216,7 @@ internal sealed class ChartFuzzer
             AppendMarkers(builder);
             if (Chance(0.8))
             {
-                builder.Append(Pick(s_durations));
+                builder.Append(PickDuration(s_holdDurations));
             }
             AppendMarkers(builder);
         }
@@ -201,7 +232,7 @@ internal sealed class ChartFuzzer
         builder.Append(area);
         if (area != 'C' || Chance(0.3))
         {
-            builder.Append(Chance(0.95) ? (char)('1' + _random.Next(8)) : 'x');
+            builder.Append((char)('1' + _random.Next(8)));
         }
         AppendMarkers(builder);
         if (Chance(0.25))
@@ -210,7 +241,7 @@ internal sealed class ChartFuzzer
             AppendMarkers(builder);
             if (Chance(0.8))
             {
-                builder.Append(Pick(s_durations));
+                builder.Append(PickDuration(s_holdDurations));
             }
         }
     }
@@ -232,6 +263,11 @@ internal sealed class ChartFuzzer
     /// <param name="builder">The chart text.</param>
     private void AppendSlidePath(StringBuilder builder)
     {
+        if (Chance(0.05))
+        {
+            builder.Append(Pick(s_slideCodes)).Append(PickDuration(s_durations));
+            return;
+        }
         var segments = Chance(0.8) ? 1 : _random.Next(2, 4);
         for (var i = 0; i < segments; i++)
         {
@@ -245,12 +281,9 @@ internal sealed class ChartFuzzer
             {
                 AppendMarkers(builder);
             }
-            if (i == segments - 1 || Chance(0.4))
+            if ((i == segments - 1 || Chance(0.4)) && Chance(0.95))
             {
-                if (Chance(0.95))
-                {
-                    builder.Append(Pick(s_durations));
-                }
+                builder.Append(PickDuration(s_durations));
             }
         }
         if (Chance(0.2))
@@ -273,6 +306,25 @@ internal sealed class ChartFuzzer
         {
             builder.Append(Pick(s_noise));
         }
+    }
+
+    /// <summary>
+    /// Picks a duration bracket, malformed at the malformed rate.
+    /// </summary>
+    /// <param name="durations">The brackets to pick from when the bracket is not malformed.</param>
+    /// <returns>The bracket text.</returns>
+    private string PickDuration(string[] durations)
+    {
+        return IsMalformed() ? Pick(s_malformedDurations) : Pick(durations);
+    }
+
+    /// <summary>
+    /// Draws whether the next token is malformed.
+    /// </summary>
+    /// <returns><see langword="true"/> at the malformed rate.</returns>
+    private bool IsMalformed()
+    {
+        return _malformedChance > 0 && Chance(_malformedChance);
     }
 
     /// <summary>

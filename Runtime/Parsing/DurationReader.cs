@@ -1,78 +1,99 @@
 using System;
 using System.Globalization;
-using MajSimai.Utils;
 
 namespace MajSimai.Parsing;
 
 /// <summary>
-/// Reads the duration brackets of holds (<c>1h[8:3]</c>) and slides (<c>1-5[8:1]</c>).
+/// The result of reading the duration of a hold or slide.
+/// </summary>
+internal enum DurationStatus
+{
+    /// <summary>The duration was read.</summary>
+    Success,
+    /// <summary>The note has no duration bracket.</summary>
+    Missing,
+    /// <summary>The bracket exists but its numbers cannot be read.</summary>
+    Unreadable,
+    /// <summary>The first <c>]</c> comes before the first <c>[</c>.</summary>
+    ReversedBrackets,
+    /// <summary>The bracket has more <c>:</c> or <c>#</c> separators than any duration form allows.</summary>
+    TooManySeparators,
+    /// <summary>A <c>[wait##length]</c> bracket has text between its two <c>#</c>.</summary>
+    UnexpectedPart
+}
+
+/// <summary>
+/// Reads the duration brackets of holds (<c>1h[8:3]</c>) and slides (<c>1-5[8:1]</c>), and the numbers of a chart.
 /// </summary>
 internal static class DurationReader
 {
+    /// <summary>
+    /// The number styles of decimal numbers: <see cref="NumberStyles.Float"/>, which allows a sign, a decimal point and
+    /// an exponent. Thousands separators are not allowed, so <c>0,071</c> is not read as 71.
+    /// </summary>
+    private const NumberStyles DecimalStyle = NumberStyles.Float;
+
     /// <summary>
     /// The culture used to read numbers.
     /// </summary>
     private static readonly CultureInfo s_culture = CultureInfo.InvariantCulture;
 
     /// <summary>
-    /// Gets whether the first <c>]</c> of a hold comes before its first <c>[</c>. MajSimai 2.x failed on such a hold
-    /// and dropped the rest of the timing point, so the caller must do the same.
+    /// Gets whether a status means the duration is malformed in a way that is always an error.
     /// </summary>
-    /// <param name="noteText">The note text without markers.</param>
-    /// <returns><see langword="true"/> when both brackets exist and are in the wrong order.</returns>
-    public static bool HasReversedHoldBrackets(ReadOnlySpan<char> noteText)
+    /// <param name="status">The status.</param>
+    /// <returns><see langword="true"/> for reversed brackets, too many separators and unexpected parts.</returns>
+    public static bool IsMalformed(DurationStatus status)
     {
-        var start = noteText.IndexOf('[');
-        var end = noteText.IndexOf(']');
-
-        return start != -1 && end != -1 && end < start;
+        return status is DurationStatus.ReversedBrackets or DurationStatus.TooManySeparators or DurationStatus.UnexpectedPart;
     }
 
     /// <summary>
     /// Reads the length of a hold from its first bracket: <c>[8:3]</c>, <c>[#1.5]</c> or <c>[150#8:3]</c>.
     /// </summary>
     /// <param name="bpm">The BPM in effect.</param>
-    /// <param name="noteText">The note text without markers; the brackets must not be reversed.</param>
+    /// <param name="noteText">The note text without markers.</param>
     /// <param name="time">Receives the length in seconds, or 0 when it cannot be read.</param>
-    /// <returns><see langword="true"/> when the length could be read.</returns>
-    public static bool TryReadHoldTime(double bpm, ReadOnlySpan<char> noteText, out double time)
+    /// <returns>Whether the length was read, and why not.</returns>
+    public static DurationStatus ReadHoldTime(double bpm, ReadOnlySpan<char> noteText, out double time)
     {
         time = 0;
         var start = noteText.IndexOf('[');
         var end = noteText.IndexOf(']');
         if (start == -1 || end == -1)
         {
-            return false;
+            return DurationStatus.Missing;
+        }
+        if (end < start)
+        {
+            return DurationStatus.ReversedBrackets;
         }
         var body = noteText.Slice(start + 1, end - start - 1);
-        Span<Range> ranges = stackalloc Range[2];
-        var count = LegacySplit.Split(body, ranges, '#', false);
-        switch (count)
+        var hashCount = Count(body, '#');
+        if (hashCount > 1)
         {
-            case 1:
-                // 2h[8:3]
-                return TryReadRatio(bpm, body, out time);
-            case 2:
-                {
-                    var first = body[ranges[0]];
-                    var second = body[ranges[1]];
-                    if (first.IsEmpty)
-                    {
-                        // 2h[#5.678]
-                        return TryParseDouble(second, out time);
-                    }
-                    // 2h[150#2:1]
-                    if (second.IsEmpty || !TryParseDouble(first, out var customBpm))
-                    {
-                        time = 0;
-                        return false;
-                    }
-
-                    return TryReadRatio(customBpm, second, out time);
-                }
-            default:
-                return false;
+            return DurationStatus.TooManySeparators;
         }
+        if (hashCount == 0)
+        {
+            // 2h[8:3]
+            return ReadRatio(bpm, body, out time);
+        }
+        var hash = body.IndexOf('#');
+        var first = body.Slice(0, hash);
+        var second = body.Slice(hash + 1);
+        if (first.IsEmpty)
+        {
+            // 2h[#5.678]
+            return TryParseDouble(second, out time) ? DurationStatus.Success : DurationStatus.Unreadable;
+        }
+        // 2h[150#2:1]
+        if (second.IsEmpty || !TryParseDouble(first, out var customBpm))
+        {
+            return DurationStatus.Unreadable;
+        }
+
+        return ReadRatio(customBpm, second, out time);
     }
 
     /// <summary>
@@ -83,8 +104,8 @@ internal static class DurationReader
     /// <param name="noteText">The note text without markers.</param>
     /// <param name="waitTime">Receives the time in seconds between the star head and the start of the slide.</param>
     /// <param name="slideTime">Receives the slide length in seconds.</param>
-    /// <returns><see langword="true"/> when the note has at least one bracket and every bracket could be read.</returns>
-    public static bool TryReadSlideTimes(double bpm, ReadOnlySpan<char> noteText, out double waitTime, out double slideTime)
+    /// <returns>Whether the times were read, and why not.</returns>
+    public static DurationStatus ReadSlideTimes(double bpm, ReadOnlySpan<char> noteText, out double waitTime, out double slideTime)
     {
         waitTime = 0;
         slideTime = 0;
@@ -94,22 +115,21 @@ internal static class DurationReader
         var bracketIndex = noteText.IndexOf('[');
         if (bracketIndex == -1)
         {
-            return false;
+            return DurationStatus.Missing;
         }
-        Span<Range> ranges = stackalloc Range[4];
         do
         {
             var slideBody = noteText.Slice(nextStart + bracketIndex);
             var closeIndex = slideBody.IndexOf(']');
             if (closeIndex == -1)
             {
-                return false;
+                return DurationStatus.Unreadable;
             }
             nextStart += closeIndex + bracketIndex + 1;
-            var body = slideBody.Slice(1, closeIndex - 1);
-            if (!TryReadSlideBracket(bpm, body, ranges, ref totalTime, ref customBpm))
+            var status = ReadSlideBracket(bpm, slideBody.Slice(1, closeIndex - 1), ref totalTime, ref customBpm);
+            if (status != DurationStatus.Success)
             {
-                return false;
+                return status;
             }
             bracketIndex = noteText.Slice(nextStart).IndexOf('[');
         }
@@ -118,95 +138,110 @@ internal static class DurationReader
         waitTime = 1d / ((customBpm ?? bpm) / 60d);
         slideTime = totalTime;
 
-        return true;
+        return DurationStatus.Success;
     }
 
     /// <summary>
     /// Reads one slide bracket body and adds its length to <paramref name="totalTime"/>.
     /// </summary>
-    private static bool TryReadSlideBracket(double bpm,
-                                            ReadOnlySpan<char> body,
-                                            Span<Range> ranges,
-                                            ref double totalTime,
-                                            ref double? customBpm)
+    /// <param name="bpm">The BPM in effect.</param>
+    /// <param name="body">The text between the brackets.</param>
+    /// <param name="totalTime">The slide length so far.</param>
+    /// <param name="customBpm">The BPM that sets the wait time, once a bracket sets one.</param>
+    /// <returns>Whether the bracket was read, and why not.</returns>
+    private static DurationStatus ReadSlideBracket(double bpm, ReadOnlySpan<char> body, ref double totalTime, ref double? customBpm)
     {
-        var count = LegacySplit.Split(body, ranges, '#', false);
-        switch (count)
+        var hashCount = Count(body, '#');
+        if (hashCount > 3)
         {
+            return DurationStatus.TooManySeparators;
+        }
+        Span<Range> parts = stackalloc Range[4];
+        Split(body, '#', parts);
+        double time;
+        DurationStatus status;
+        switch (hashCount)
+        {
+            case 0:
+                // [8:1]
+                status = ReadRatio(bpm, body, out time);
+                if (status != DurationStatus.Success)
+                {
+                    return status;
+                }
+                totalTime += time;
+
+                return DurationStatus.Success;
             case 1:
                 {
-                    // [8:1]
-                    if (!TryReadRatio(bpm, body, out var time))
+                    // [160#8:3] or [160#2]
+                    var first = body[parts[0]];
+                    var second = body[parts[1]];
+                    if (first.IsEmpty || second.IsEmpty || !TryParseDouble(first, out var slideBpm))
                     {
-                        return false;
+                        return DurationStatus.Unreadable;
+                    }
+                    status = TryParseDouble(second, out time) ? DurationStatus.Success : ReadRatio(slideBpm, second, out time);
+                    if (status != DurationStatus.Success)
+                    {
+                        return status;
                     }
                     totalTime += time;
+                    customBpm ??= slideBpm;
 
-                    return true;
+                    return DurationStatus.Success;
                 }
             case 2:
                 {
-                    // [160#8:3] or [160#2]
-                    var first = body[ranges[0]];
-                    var second = body[ranges[1]];
-                    if (first.IsEmpty || second.IsEmpty || !TryParseDouble(first, out var slideBpm))
-                    {
-                        return false;
-                    }
-                    if (TryParseDouble(second, out var time) || TryReadRatio(slideBpm, second, out time))
-                    {
-                        totalTime += time;
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                    customBpm ??= slideBpm;
-
-                    return true;
-                }
-            case 3:
-                {
                     // [3##1.5] or [3##8:3]
-                    var first = body[ranges[0]];
-                    var third = body[ranges[2]];
+                    if (!body[parts[1]].IsEmpty)
+                    {
+                        return DurationStatus.UnexpectedPart;
+                    }
+                    var first = body[parts[0]];
+                    var third = body[parts[2]];
                     if (first.IsEmpty || third.IsEmpty || !TryParseDouble(first, out var wait))
                     {
-                        return false;
+                        return DurationStatus.Unreadable;
                     }
-                    if (TryParseDouble(third, out var time) || TryReadRatio(bpm, third, out time))
+                    status = TryParseDouble(third, out time) ? DurationStatus.Success : ReadRatio(bpm, third, out time);
+                    if (status != DurationStatus.Success)
                     {
-                        totalTime += time;
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                    customBpm ??= 60d / wait;
-
-                    return true;
-                }
-            case 4:
-                {
-                    // [3##160#8:3]
-                    var first = body[ranges[0]];
-                    var third = body[ranges[2]];
-                    var fourth = body[ranges[3]];
-                    if (first.IsEmpty || third.IsEmpty || fourth.IsEmpty || !TryParseDouble(first, out var wait))
-                    {
-                        return false;
-                    }
-                    if (!TryParseDouble(third, out var slideBpm) || !TryReadRatio(slideBpm, fourth, out var time))
-                    {
-                        return false;
+                        return status;
                     }
                     totalTime += time;
                     customBpm ??= 60d / wait;
 
-                    return true;
+                    return DurationStatus.Success;
                 }
             default:
-                return false;
+                {
+                    // [3##160#8:3]
+                    if (!body[parts[1]].IsEmpty)
+                    {
+                        return DurationStatus.UnexpectedPart;
+                    }
+                    var first = body[parts[0]];
+                    var third = body[parts[2]];
+                    var fourth = body[parts[3]];
+                    if (first.IsEmpty || third.IsEmpty || fourth.IsEmpty || !TryParseDouble(first, out var wait))
+                    {
+                        return DurationStatus.Unreadable;
+                    }
+                    if (!TryParseDouble(third, out var slideBpm))
+                    {
+                        return DurationStatus.Unreadable;
+                    }
+                    status = ReadRatio(slideBpm, fourth, out time);
+                    if (status != DurationStatus.Success)
+                    {
+                        return status;
+                    }
+                    totalTime += time;
+                    customBpm ??= 60d / wait;
+
+                    return DurationStatus.Success;
+                }
         }
     }
 
@@ -216,33 +251,80 @@ internal static class DurationReader
     /// <param name="bpm">The BPM the length is measured in.</param>
     /// <param name="text">The ratio text.</param>
     /// <param name="time">Receives the length in seconds.</param>
-    /// <returns><see langword="true"/> when both numbers could be read.</returns>
-    private static bool TryReadRatio(double bpm, ReadOnlySpan<char> text, out double time)
+    /// <returns>Whether the length was read, and why not.</returns>
+    private static DurationStatus ReadRatio(double bpm, ReadOnlySpan<char> text, out double time)
     {
         time = 0;
-        var timeOneBeat = 1d / (bpm / 60d);
-        Span<Range> ranges = stackalloc Range[2];
-        if (LegacySplit.Split(text, ranges, ':', false) != 2)
+        var colonCount = Count(text, ':');
+        if (colonCount > 1)
         {
-            return false;
+            return DurationStatus.TooManySeparators;
         }
-        var divisionText = text[ranges[0]];
-        var countText = text[ranges[1]];
+        if (colonCount == 0)
+        {
+            return DurationStatus.Unreadable;
+        }
+        var colon = text.IndexOf(':');
+        var divisionText = text.Slice(0, colon);
+        var countText = text.Slice(colon + 1);
         if (divisionText.IsEmpty || countText.IsEmpty)
         {
-            return false;
+            return DurationStatus.Unreadable;
         }
         if (!TryParseInt(divisionText, out var division) || !TryParseInt(countText, out var count))
         {
-            return false;
+            return DurationStatus.Unreadable;
         }
+        var timeOneBeat = 1d / (bpm / 60d);
         time = timeOneBeat * 4d / division * count;
 
-        return true;
+        return DurationStatus.Success;
     }
 
     /// <summary>
-    /// Parses an integer the way MajSimai 2.x did: <see cref="NumberStyles.Integer"/> with the invariant culture.
+    /// Splits <paramref name="text"/> at every <paramref name="separator"/>. The caller makes sure there is room for
+    /// every part.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="separator">The separator.</param>
+    /// <param name="parts">Receives the range of each part.</param>
+    private static void Split(ReadOnlySpan<char> text, char separator, Span<Range> parts)
+    {
+        var start = 0;
+        var count = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == separator)
+            {
+                parts[count++] = new Range(start, i);
+                start = i + 1;
+            }
+        }
+        parts[count] = new Range(start, text.Length);
+    }
+
+    /// <summary>
+    /// Counts the occurrences of a character.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="value">The character.</param>
+    /// <returns>The number of occurrences.</returns>
+    private static int Count(ReadOnlySpan<char> text, char value)
+    {
+        var count = 0;
+        foreach (var c in text)
+        {
+            if (c == value)
+            {
+                count++;
+            }
+        }
+
+        return count;
+    }
+
+    /// <summary>
+    /// Parses an integer: an optional sign and digits, with the invariant culture.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="value">Receives the value.</param>
@@ -253,26 +335,25 @@ internal static class DurationReader
     }
 
     /// <summary>
-    /// Parses a number the way MajSimai 2.x did: <see cref="NumberStyles.Float"/> and
-    /// <see cref="NumberStyles.AllowThousands"/> with the invariant culture.
+    /// Parses a decimal number with <see cref="NumberStyles.Float"/> and the invariant culture. Thousands separators are
+    /// rejected; <c>NaN</c> and <c>Infinity</c> are accepted as MajSimai 2.x did, because charts use them as effects.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="value">Receives the value.</param>
     /// <returns><see langword="true"/> when the text is a number.</returns>
     public static bool TryParseDouble(ReadOnlySpan<char> text, out double value)
     {
-        return double.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, s_culture, out value);
+        return double.TryParse(text, DecimalStyle, s_culture, out value);
     }
 
     /// <summary>
-    /// Parses a single precision number the way MajSimai 2.x did: <see cref="NumberStyles.Float"/> and
-    /// <see cref="NumberStyles.AllowThousands"/> with the invariant culture.
+    /// Parses a single precision decimal number with the same rules as <see cref="TryParseDouble"/>.
     /// </summary>
     /// <param name="text">The text.</param>
     /// <param name="value">Receives the value.</param>
     /// <returns><see langword="true"/> when the text is a number.</returns>
     public static bool TryParseFloat(ReadOnlySpan<char> text, out float value)
     {
-        return float.TryParse(text, NumberStyles.Float | NumberStyles.AllowThousands, s_culture, out value);
+        return float.TryParse(text, DecimalStyle, s_culture, out value);
     }
 }

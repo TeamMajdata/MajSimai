@@ -77,15 +77,14 @@ public sealed class FileParsingTests
     }
 
     /// <summary>
-    /// Metadata: line without equals throws.
+    /// Metadata: line without equals is ignored in lenient mode.
     /// </summary>
     [Fact]
-    public void Metadata_LineWithoutEquals_Throws()
+    public void Metadata_LineWithoutEquals_IsIgnored()
     {
-        var error = Assert.Throws<InvalidSimaiMarkupException>(() => SimaiParser.ParseMetadata("&title=a\n&broken".AsSpan(), string.Empty));
+        var metadata = SimaiParser.ParseMetadata("&title=a\n&broken\n&artist=b".AsSpan(), string.Empty);
 
-        Assert.Equal(2, error.Line);
-        Assert.Equal("&broken", error.Content);
+        Assert.Equal(("a", "b"), (metadata.Title, metadata.Artist));
     }
 
     /// <summary>

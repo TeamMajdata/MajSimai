@@ -1,6 +1,6 @@
 ﻿using System;
-using System.Globalization;
 using System.IO;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Threading.Tasks;
 using MajSimai.Logging;
@@ -12,9 +12,11 @@ namespace MajSimai;
 /// Parses simai files and charts, and writes simai files back to text.
 /// </summary>
 /// <remarks>
-/// The seven charts of a file are parsed in parallel, and the notes of a long chart are read in parallel as well. A
-/// chart that fails to parse does not fail the file: it is kept with its text but without timing points, and the error is
-/// logged through <see cref="SimaiLogger"/>.
+/// The seven charts of a file are parsed in parallel, and the notes of a long chart are read in parallel as well. In
+/// lenient mode (the default) a chart that fails to parse does not fail the file: it is kept with its text but without
+/// timing points, and the error is logged through <see cref="SimaiLogger"/>. In strict mode
+/// (<see cref="SimaiParserOptions.Strict"/>) the first chart that fails makes the whole parse fail. Numbers are always
+/// read with the invariant culture.
 /// </remarks>
 public static class SimaiParser
 {
@@ -25,24 +27,37 @@ public static class SimaiParser
     /// </summary>
     /// <param name="content">The simai text.</param>
     /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The parsed file.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="hash"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a field line is malformed.</exception>
-    public static SimaiFile Parse(ReadOnlySpan<char> content, string hash)
+    public static SimaiFile Parse(ReadOnlySpan<char> content, string hash, SimaiParserOptions? options = null)
     {
-        return Parse(ParseMetadata(content, hash));
+        return Parse(ParseMetadata(content, hash, options), options);
     }
 
     /// <summary>
     /// Parses the charts of <paramref name="metadata"/> into a <see cref="SimaiFile"/>.
     /// </summary>
-    /// <param name="metadata">The metadata read by <see cref="ParseMetadata(ReadOnlySpan{char}, string)"/>.</param>
+    /// <param name="metadata">The metadata read by <see cref="ParseMetadata(ReadOnlySpan{char}, string, SimaiParserOptions)"/>.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The parsed file.</returns>
-    public static SimaiFile Parse(SimaiMetadata metadata)
+    public static SimaiFile Parse(SimaiMetadata metadata, SimaiParserOptions? options = null)
     {
-        MakeSureCulture();
         var charts = new SimaiChart[SimaiMetadata.ChartCount];
-        Parallel.For(0, charts.Length, i => charts[i] = ParseChartOrFallback(metadata, i));
+        var errors = new Exception?[charts.Length];
+        Parallel.For(0, charts.Length, i =>
+        {
+            try
+            {
+                charts[i] = ParseChartForFile(metadata, i, options);
+            }
+            catch (Exception e)
+            {
+                errors[i] = e;
+            }
+        });
+        ThrowFirst(errors);
         LogParsedFile(metadata, charts);
 
         return new SimaiFile(metadata, charts);
@@ -53,12 +68,13 @@ public static class SimaiParser
     /// <see cref="SimaiFile"/>. The hash is the Base64 MD5 hash of the bytes.
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The parsed file.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="contentStream"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a field line is malformed.</exception>
-    public static SimaiFile Parse(Stream contentStream)
+    public static SimaiFile Parse(Stream contentStream, SimaiParserOptions? options = null)
     {
-        return Parse(contentStream, Encoding.UTF8);
+        return Parse(contentStream, Encoding.UTF8, options);
     }
 
     /// <summary>
@@ -67,14 +83,15 @@ public static class SimaiParser
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
     /// <param name="encoding">The encoding of the text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The parsed file.</returns>
     /// <exception cref="ArgumentNullException">Thrown when an argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a field line is malformed.</exception>
-    public static SimaiFile Parse(Stream contentStream, Encoding encoding)
+    public static SimaiFile Parse(Stream contentStream, Encoding encoding, SimaiParserOptions? options = null)
     {
         using var content = ContentDecoder.Decode(contentStream, encoding);
 
-        return Parse(content.Span, content.Hash);
+        return Parse(content.Span, content.Hash, options);
     }
 
     /// <summary>
@@ -82,16 +99,17 @@ public static class SimaiParser
     /// </summary>
     /// <param name="content">The simai text.</param>
     /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed file.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="content"/> is <see langword="null"/>.</exception>
-    public static Task<SimaiFile> ParseAsync(string content, string hash)
+    public static Task<SimaiFile> ParseAsync(string content, string hash, SimaiParserOptions? options = null)
     {
         if (content is null)
         {
             throw new ArgumentNullException(nameof(content));
         }
 
-        return ParseAsync(content.AsMemory(), hash);
+        return ParseAsync(content.AsMemory(), hash, options);
     }
 
     /// <summary>
@@ -99,23 +117,44 @@ public static class SimaiParser
     /// </summary>
     /// <param name="content">The simai text; it must not change until the task completes.</param>
     /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed file.</returns>
-    public static async Task<SimaiFile> ParseAsync(ReadOnlyMemory<char> content, string hash)
+    public static async Task<SimaiFile> ParseAsync(ReadOnlyMemory<char> content, string hash, SimaiParserOptions? options = null)
     {
-        var metadata = await ParseMetadataAsync(content, hash).ConfigureAwait(false);
+        var metadata = await ParseMetadataAsync(content, hash, options).ConfigureAwait(false);
 
-        return await ParseAsync(metadata).ConfigureAwait(false);
+        return await ParseAsync(metadata, options).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Parses the charts of <paramref name="metadata"/> into a <see cref="SimaiFile"/> on the thread pool.
     /// </summary>
     /// <param name="metadata">The metadata.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed file.</returns>
-    public static async Task<SimaiFile> ParseAsync(SimaiMetadata metadata)
+    public static async Task<SimaiFile> ParseAsync(SimaiMetadata metadata, SimaiParserOptions? options = null)
     {
-        MakeSureCulture();
-        var charts = await Task.WhenAll(StartChartTasks(metadata)).ConfigureAwait(false);
+        var tasks = StartChartTasks(metadata, options);
+        try
+        {
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+        }
+        catch (Exception)
+        {
+            foreach (var task in tasks)
+            {
+                if (task.IsFaulted)
+                {
+                    ExceptionDispatchInfo.Capture(task.Exception!.InnerException!).Throw();
+                }
+            }
+            throw;
+        }
+        var charts = new SimaiChart[tasks.Length];
+        for (var i = 0; i < tasks.Length; i++)
+        {
+            charts[i] = tasks[i].Result;
+        }
         LogParsedFile(metadata, charts);
 
         return new SimaiFile(metadata, charts);
@@ -125,10 +164,11 @@ public static class SimaiParser
     /// Reads a stream to its end with UTF-8 and parses it into a <see cref="SimaiFile"/> without blocking.
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed file.</returns>
-    public static Task<SimaiFile> ParseAsync(Stream contentStream)
+    public static Task<SimaiFile> ParseAsync(Stream contentStream, SimaiParserOptions? options = null)
     {
-        return ParseAsync(contentStream, Encoding.UTF8);
+        return ParseAsync(contentStream, Encoding.UTF8, options);
     }
 
     /// <summary>
@@ -137,12 +177,13 @@ public static class SimaiParser
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
     /// <param name="encoding">The encoding of the text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed file.</returns>
-    public static async Task<SimaiFile> ParseAsync(Stream contentStream, Encoding encoding)
+    public static async Task<SimaiFile> ParseAsync(Stream contentStream, Encoding encoding, SimaiParserOptions? options = null)
     {
         using var content = await ContentDecoder.DecodeAsync(contentStream, encoding).ConfigureAwait(false);
 
-        return await ParseAsync(content.Memory, content.Hash).ConfigureAwait(false);
+        return await ParseAsync(content.Memory, content.Hash, options).ConfigureAwait(false);
     }
 
     #endregion
@@ -154,25 +195,25 @@ public static class SimaiParser
     /// </summary>
     /// <param name="content">The simai text.</param>
     /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The metadata.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="hash"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a line starting with <c>&amp;</c> has no <c>=</c>.</exception>
-    public static SimaiMetadata ParseMetadata(ReadOnlySpan<char> content, string hash)
+    public static SimaiMetadata ParseMetadata(ReadOnlySpan<char> content, string hash, SimaiParserOptions? options = null)
     {
-        MakeSureCulture();
-
-        return MetadataReader.Read(content, hash);
+        return MetadataReader.Read(content, hash, SyntaxReporter.For(options));
     }
 
     /// <summary>
     /// Reads a stream to its end with UTF-8 and reads its fields into <see cref="SimaiMetadata"/>.
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The metadata.</returns>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a line starting with <c>&amp;</c> has no <c>=</c>.</exception>
-    public static SimaiMetadata ParseMetadata(Stream contentStream)
+    public static SimaiMetadata ParseMetadata(Stream contentStream, SimaiParserOptions? options = null)
     {
-        return ParseMetadata(contentStream, Encoding.UTF8);
+        return ParseMetadata(contentStream, Encoding.UTF8, options);
     }
 
     /// <summary>
@@ -180,14 +221,15 @@ public static class SimaiParser
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
     /// <param name="encoding">The encoding of the text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The metadata.</returns>
     /// <exception cref="ArgumentNullException">Thrown when an argument is <see langword="null"/>.</exception>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a line starting with <c>&amp;</c> has no <c>=</c>.</exception>
-    public static SimaiMetadata ParseMetadata(Stream contentStream, Encoding encoding)
+    public static SimaiMetadata ParseMetadata(Stream contentStream, Encoding encoding, SimaiParserOptions? options = null)
     {
         using var content = ContentDecoder.Decode(contentStream, encoding);
 
-        return ParseMetadata(content.Span, content.Hash);
+        return ParseMetadata(content.Span, content.Hash, options);
     }
 
     /// <summary>
@@ -195,10 +237,11 @@ public static class SimaiParser
     /// </summary>
     /// <param name="content">The simai text.</param>
     /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the metadata.</returns>
-    public static Task<SimaiMetadata> ParseMetadataAsync(string content, string hash)
+    public static Task<SimaiMetadata> ParseMetadataAsync(string content, string hash, SimaiParserOptions? options = null)
     {
-        return Task.Run(() => ParseMetadata(content.AsSpan(), hash));
+        return Task.Run(() => ParseMetadata(content.AsSpan(), hash, options));
     }
 
     /// <summary>
@@ -206,20 +249,22 @@ public static class SimaiParser
     /// </summary>
     /// <param name="content">The simai text; it must not change until the task completes.</param>
     /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the metadata.</returns>
-    public static Task<SimaiMetadata> ParseMetadataAsync(ReadOnlyMemory<char> content, string hash)
+    public static Task<SimaiMetadata> ParseMetadataAsync(ReadOnlyMemory<char> content, string hash, SimaiParserOptions? options = null)
     {
-        return Task.Run(() => ParseMetadata(content.Span, hash));
+        return Task.Run(() => ParseMetadata(content.Span, hash, options));
     }
 
     /// <summary>
     /// Reads a stream to its end with UTF-8 and reads its fields into <see cref="SimaiMetadata"/> without blocking.
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the metadata.</returns>
-    public static Task<SimaiMetadata> ParseMetadataAsync(Stream contentStream)
+    public static Task<SimaiMetadata> ParseMetadataAsync(Stream contentStream, SimaiParserOptions? options = null)
     {
-        return ParseMetadataAsync(contentStream, Encoding.UTF8);
+        return ParseMetadataAsync(contentStream, Encoding.UTF8, options);
     }
 
     /// <summary>
@@ -228,12 +273,13 @@ public static class SimaiParser
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
     /// <param name="encoding">The encoding of the text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the metadata.</returns>
-    public static async Task<SimaiMetadata> ParseMetadataAsync(Stream contentStream, Encoding encoding)
+    public static async Task<SimaiMetadata> ParseMetadataAsync(Stream contentStream, Encoding encoding, SimaiParserOptions? options = null)
     {
         using var content = await ContentDecoder.DecodeAsync(contentStream, encoding).ConfigureAwait(false);
 
-        return await ParseMetadataAsync(content.Memory, content.Hash).ConfigureAwait(false);
+        return await ParseMetadataAsync(content.Memory, content.Hash, options).ConfigureAwait(false);
     }
 
     #endregion
@@ -244,12 +290,13 @@ public static class SimaiParser
     /// Parses a chart text into a <see cref="SimaiChart"/> without a level or designer.
     /// </summary>
     /// <param name="fumen">The chart text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The parsed chart.</returns>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a declaration or comment is malformed.</exception>
     /// <exception cref="Exception">Thrown with the message <c>Error at line,column</c> for other failures.</exception>
-    public static SimaiChart ParseChart(ReadOnlySpan<char> fumen)
+    public static SimaiChart ParseChart(ReadOnlySpan<char> fumen, SimaiParserOptions? options = null)
     {
-        return ParseChart(string.Empty, string.Empty, fumen);
+        return ParseChart(string.Empty, string.Empty, fumen, options);
     }
 
     /// <summary>
@@ -258,15 +305,14 @@ public static class SimaiParser
     /// <param name="level">The level text of the chart.</param>
     /// <param name="designer">The designer of the chart.</param>
     /// <param name="fumen">The chart text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>The parsed chart.</returns>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="level"/> or <paramref name="designer"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a declaration or comment is malformed.</exception>
     /// <exception cref="Exception">Thrown with the message <c>Error at line,column</c> for other failures.</exception>
-    public static SimaiChart ParseChart(string level, string designer, ReadOnlySpan<char> fumen)
+    public static SimaiChart ParseChart(string level, string designer, ReadOnlySpan<char> fumen, SimaiParserOptions? options = null)
     {
-        MakeSureCulture();
-
-        return ChartParser.Parse(level, designer, fumen, null, true);
+        return ChartParser.Parse(level, designer, fumen, null, SyntaxReporter.For(options), true);
     }
 
     /// <summary>
@@ -275,33 +321,34 @@ public static class SimaiParser
     /// <param name="level">The level text of the chart.</param>
     /// <param name="designer">The designer of the chart.</param>
     /// <param name="fumen">The chart text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <param name="allowParallel">Whether the notes of a long chart may be read on several threads.</param>
     /// <returns>The parsed chart.</returns>
-    internal static SimaiChart ParseChart(string level, string designer, string fumen, bool allowParallel)
+    internal static SimaiChart ParseChart(string level, string designer, string fumen, SimaiParserOptions? options, bool allowParallel)
     {
-        MakeSureCulture();
-
-        return ChartParser.Parse(level, designer, fumen.AsSpan(), fumen, allowParallel);
+        return ChartParser.Parse(level, designer, fumen.AsSpan(), fumen, SyntaxReporter.For(options), allowParallel);
     }
 
     /// <summary>
     /// Parses a chart text into a <see cref="SimaiChart"/> on the thread pool.
     /// </summary>
     /// <param name="fumen">The chart text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed chart.</returns>
-    public static Task<SimaiChart> ParseChartAsync(string fumen)
+    public static Task<SimaiChart> ParseChartAsync(string fumen, SimaiParserOptions? options = null)
     {
-        return ParseChartAsync(string.Empty, string.Empty, fumen);
+        return ParseChartAsync(string.Empty, string.Empty, fumen, options);
     }
 
     /// <summary>
     /// Parses a chart text into a <see cref="SimaiChart"/> on the thread pool.
     /// </summary>
     /// <param name="fumen">The chart text; it must not change until the task completes.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed chart.</returns>
-    public static Task<SimaiChart> ParseChartAsync(ReadOnlyMemory<char> fumen)
+    public static Task<SimaiChart> ParseChartAsync(ReadOnlyMemory<char> fumen, SimaiParserOptions? options = null)
     {
-        return ParseChartAsync(string.Empty, string.Empty, fumen);
+        return ParseChartAsync(string.Empty, string.Empty, fumen, options);
     }
 
     /// <summary>
@@ -310,10 +357,11 @@ public static class SimaiParser
     /// <param name="level">The level text of the chart.</param>
     /// <param name="designer">The designer of the chart.</param>
     /// <param name="fumen">The chart text; it must not change until the task completes.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed chart.</returns>
-    public static Task<SimaiChart> ParseChartAsync(string level, string designer, ReadOnlyMemory<char> fumen)
+    public static Task<SimaiChart> ParseChartAsync(string level, string designer, ReadOnlyMemory<char> fumen, SimaiParserOptions? options = null)
     {
-        return Task.Run(() => ParseChart(level, designer, fumen.Span));
+        return Task.Run(() => ParseChart(level, designer, fumen.Span, options));
     }
 
     /// <summary>
@@ -322,10 +370,11 @@ public static class SimaiParser
     /// <param name="level">The level text of the chart.</param>
     /// <param name="designer">The designer of the chart.</param>
     /// <param name="fumen">The chart text.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
     /// <returns>A task that returns the parsed chart.</returns>
-    public static Task<SimaiChart> ParseChartAsync(string level, string designer, string fumen)
+    public static Task<SimaiChart> ParseChartAsync(string level, string designer, string fumen, SimaiParserOptions? options = null)
     {
-        return Task.Run(() => ParseChart(level, designer, fumen ?? string.Empty, true));
+        return Task.Run(() => ParseChart(level, designer, fumen ?? string.Empty, options, true));
     }
 
     #endregion
@@ -340,8 +389,6 @@ public static class SimaiParser
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="simaiFile"/> is <see langword="null"/>.</exception>
     public static string Deparse(SimaiFile simaiFile)
     {
-        MakeSureCulture();
-
         return SimaiDeparser.Deparse(simaiFile);
     }
 
@@ -409,7 +456,10 @@ public static class SimaiParser
     /// <summary>
     /// Starts one task per chart of a file. Empty charts complete at once.
     /// </summary>
-    private static Task<SimaiChart>[] StartChartTasks(SimaiMetadata metadata)
+    /// <param name="metadata">The metadata of the file.</param>
+    /// <param name="options">The parser options.</param>
+    /// <returns>The tasks, in chart order.</returns>
+    private static Task<SimaiChart>[] StartChartTasks(SimaiMetadata metadata, SimaiParserOptions? options)
     {
         var tasks = new Task<SimaiChart>[SimaiMetadata.ChartCount];
         var fumens = metadata.Fumens;
@@ -417,30 +467,51 @@ public static class SimaiParser
         {
             var index = i;
             tasks[i] = string.IsNullOrEmpty(fumens[i])
-                ? Task.FromResult(ParseChartOrFallback(metadata, index))
-                : Task.Run(() => ParseChartOrFallback(metadata, index));
+                ? Task.FromResult(ParseChartForFile(metadata, index, options))
+                : Task.Run(() => ParseChartForFile(metadata, index, options));
         }
 
         return tasks;
     }
 
     /// <summary>
-    /// Parses chart <paramref name="index"/> of a file. A chart that fails keeps its text but has no timing points.
+    /// Parses chart <paramref name="index"/> of a file. In lenient mode a chart that fails keeps its text but has no
+    /// timing points; in strict mode the exception is thrown.
     /// </summary>
-    private static SimaiChart ParseChartOrFallback(in SimaiMetadata metadata, int index)
+    /// <param name="metadata">The metadata of the file.</param>
+    /// <param name="index">The zero based chart index.</param>
+    /// <param name="options">The parser options.</param>
+    /// <returns>The chart.</returns>
+    /// <exception cref="InvalidSimaiMarkupException">Thrown in strict mode when the chart breaks the grammar.</exception>
+    private static SimaiChart ParseChartForFile(in SimaiMetadata metadata, int index, SimaiParserOptions? options)
     {
         var level = metadata.Levels[index] ?? string.Empty;
         var designer = metadata.Designers[index] ?? string.Empty;
         var fumen = metadata.Fumens[index] ?? string.Empty;
         try
         {
-            return ParseChart(level, designer, fumen, true);
+            return ParseChart(level, designer, fumen, options, true);
         }
-        catch (Exception e)
+        catch (Exception e) when (options?.IsStrict != true)
         {
             SimaiLogger.Error($"Failed to parse chart {index + 1} (&inote_{index + 1}) of \"{metadata.Title}\" (hash {metadata.Hash}).", e);
 
             return SimaiChart.Create(level, designer, fumen, Array.Empty<SimaiTimingPoint>(), Array.Empty<CommaTiming>());
+        }
+    }
+
+    /// <summary>
+    /// Throws the first exception of a list, in list order.
+    /// </summary>
+    /// <param name="errors">The exceptions, with <see langword="null"/> where there was none.</param>
+    private static void ThrowFirst(Exception?[] errors)
+    {
+        foreach (var error in errors)
+        {
+            if (error is not null)
+            {
+                ExceptionDispatchInfo.Capture(error).Throw();
+            }
         }
     }
 
@@ -461,15 +532,5 @@ public static class SimaiParser
             timingCount += chart.NoteTimings.Length;
         }
         SimaiLogger.Info($"Parsed \"{metadata.Title}\" (hash {metadata.Hash}): {timingCount} note timing points in 7 charts.");
-    }
-
-    /// <summary>
-    /// Makes new threads use the invariant culture, as MajSimai 2.x did. Parsing itself always uses the invariant
-    /// culture.
-    /// </summary>
-    private static void MakeSureCulture()
-    {
-        CultureInfo.DefaultThreadCurrentCulture = CultureInfo.InvariantCulture;
-        CultureInfo.DefaultThreadCurrentUICulture = CultureInfo.InvariantCulture;
     }
 }

@@ -127,9 +127,6 @@ public sealed class ChartParsingTests
     [InlineData("<HS*1*2>1,", typeof(InvalidSimaiSyntaxException), "Unexpected HS declaration syntax")]
     [InlineData("<XX*1>1,", typeof(InvalidSimaiSyntaxException), "Unexpected HS / SV declaration syntax \"XX\", is it \"HS\" or \"SV\"?")]
     [InlineData("|x", typeof(InvalidSimaiMarkupException), "Unexpected character \"|\"")]
-    [InlineData("1,(", typeof(InvalidSimaiMarkupException), "Unexpected character \"(\"")]
-    [InlineData("1,{", typeof(InvalidSimaiMarkupException), "Unexpected character \"{\"")]
-    [InlineData("<1>", typeof(InvalidSimaiMarkupException), "Unexpected character \"<\"")]
     public void MalformedDeclarations_Throw(string fumen, Type exceptionType, string message)
     {
         var error = Assert.Throws(exceptionType, () => SimaiParser.ParseChart(fumen));
@@ -147,7 +144,7 @@ public sealed class ChartParsingTests
         var error = Assert.Throws<InvalidSimaiSyntaxException>(() => SimaiParser.ParseChart("1,\n( x )"));
 
         Assert.Equal(2, error.Line);
-        Assert.Equal(5, error.Column);
+        Assert.Equal(1, error.Column);
         Assert.Equal("x", error.Content);
     }
 

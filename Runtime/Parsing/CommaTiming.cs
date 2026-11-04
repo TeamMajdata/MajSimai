@@ -14,6 +14,7 @@ internal readonly struct CommaTiming
     /// </summary>
     /// <param name="timing">The time in seconds.</param>
     /// <param name="bpm">The BPM in effect.</param>
+    /// <param name="hSpeed">The note speed multiplier in effect.</param>
     /// <param name="sVeloc">The slide velocity multiplier in effect.</param>
     /// <param name="textPositionX">The column of the comma.</param>
     /// <param name="textPositionY">The line of the comma.</param>
@@ -22,6 +23,7 @@ internal readonly struct CommaTiming
     /// <param name="signatureDenominator">The denominator of the time signature in effect.</param>
     public CommaTiming(double timing,
                        float bpm,
+                       float hSpeed,
                        float sVeloc,
                        int textPositionX,
                        int textPositionY,
@@ -31,6 +33,7 @@ internal readonly struct CommaTiming
     {
         Timing = timing;
         Bpm = bpm;
+        HSpeed = hSpeed;
         SVeloc = sVeloc;
         TextPositionX = textPositionX;
         TextPositionY = textPositionY;
@@ -44,6 +47,9 @@ internal readonly struct CommaTiming
 
     /// <summary>Gets the BPM in effect.</summary>
     public float Bpm { get; }
+
+    /// <summary>Gets the note speed multiplier in effect.</summary>
+    public float HSpeed { get; }
 
     /// <summary>Gets the slide velocity multiplier in effect.</summary>
     public float SVeloc { get; }
@@ -64,8 +70,7 @@ internal readonly struct CommaTiming
     public int SignatureDenominator { get; }
 
     /// <summary>
-    /// Creates the timing point object. Comma timing points have no notes and an <see cref="SimaiTimingPoint.HSpeed"/>
-    /// of 1.
+    /// Creates the timing point object. Comma timing points have no notes.
     /// </summary>
     /// <returns>The timing point.</returns>
     public SimaiTimingPoint ToTimingPoint()
@@ -76,7 +81,7 @@ internal readonly struct CommaTiming
                                        TextPositionX,
                                        TextPositionY,
                                        Bpm,
-                                       1f,
+                                       HSpeed,
                                        SVeloc,
                                        TextPosition,
                                        SignatureNumerator,
