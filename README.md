@@ -189,22 +189,6 @@ questionable. The checks include:
 Codes are listed in `SimaiDiagnosticCodes`: `SM1xx` chart structure, `SM2xx` notes, `SM3xx` slide paths, `SM4xx`
 fields.
 
-## Changes from 2.2.3
-
-Apart from the note model, lenient mode reads charts as MajSimai 2.2.3 did, except for these fixes:
-
-- Columns are the real columns of the text (2.x counted declarations and comments wrongly).
-- `||` at the very end of a chart is a comment (2.x threw an index error).
-- Note timing points carry the SV and time signature in effect, and comma timing points the HS in effect (2.x used 1
-  and 0/0).
-- The end marker `E` ends the chart.
-- A fake each keeps all its parts (2.x lost parts after the eighth).
-- Field names and values are trimmed: `&title = Song` is the title `Song`.
-- Parsing no longer changes `CultureInfo.DefaultThreadCurrentCulture`.
-- A declaration that is not closed throws instead of reading to the end of the text.
-- The malformed notes listed above are skipped with a warning, instead of being read as a different note (`12E` as a
-  touch on area `1`), adding a tap (`1-5[8:1]*`), or silently dropping the rest of their timing point (`1/b/2`).
-
 ## Logging
 
 MajSimai writes messages through `SimaiLogger.Current`. The default logger writes `Warning` and `Error` messages to the
