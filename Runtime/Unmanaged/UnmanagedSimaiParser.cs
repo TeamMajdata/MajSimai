@@ -128,26 +128,14 @@ public static unsafe class UnmanagedSimaiParser
     /// Creates the successful result of a parsed file. On failure nothing stays allocated.
     /// </summary>
     /// <param name="file">The parsed file.</param>
-    /// <returns>A result that owns a native copy of <paramref name="file"/>.</returns>
+    /// <returns>A result that owns a native copy of <paramref name="file"/>, in one block of native memory.</returns>
+    /// <exception cref="OutOfMemoryException">Thrown when the native copy cannot be allocated.</exception>
     internal static UnmanagedSimaiParseResult CreateSuccess(SimaiFile file)
     {
-        var native = UnmanagedConverter.ToUnmanaged(file);
-        UnmanagedSimaiFile* pointer;
-        try
-        {
-            pointer = (UnmanagedSimaiFile*)Marshal.AllocHGlobal(sizeof(UnmanagedSimaiFile));
-        }
-        catch
-        {
-            native.Free();
-            throw;
-        }
-        *pointer = native;
-
         return new UnmanagedSimaiParseResult
         {
             code = UnmanagedSimaiParseResult.CODE_NO_ERROR,
-            simaiFile = pointer,
+            simaiFile = UnmanagedConverter.ToUnmanaged(file),
         };
     }
 

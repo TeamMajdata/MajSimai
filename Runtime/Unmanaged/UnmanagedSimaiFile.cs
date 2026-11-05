@@ -47,41 +47,5 @@ internal unsafe struct UnmanagedSimaiFile
     /// <summary>The other fields of the file.</summary>
     [NativeArray(nameof(commandsLen))]
     public UnmanagedSimaiCommand* commands;
-
-    /// <summary>
-    /// Frees the memory owned by the file, its charts and its commands.
-    /// </summary>
-    public void Free()
-    {
-        Marshal.FreeHGlobal((nint)title);
-        Marshal.FreeHGlobal((nint)artist);
-        Marshal.FreeHGlobal((nint)finalDesigner);
-        if (charts is not null)
-        {
-            for (var i = 0; i < chartsLen; i++)
-            {
-                (charts + i)->Free();
-            }
-            Marshal.FreeHGlobal((nint)charts);
-            charts = null;
-        }
-        if (commands is not null)
-        {
-            for (var i = 0; i < commandsLen; i++)
-            {
-                (commands + i)->Free();
-            }
-            Marshal.FreeHGlobal((nint)commands);
-            commands = null;
-        }
-        title = null;
-        artist = null;
-        finalDesigner = null;
-        titleLen = 0;
-        artistLen = 0;
-        finalDesignerLen = 0;
-        chartsLen = 0;
-        commandsLen = 0;
-    }
 }
 #endif

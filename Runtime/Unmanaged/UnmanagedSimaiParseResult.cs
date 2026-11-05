@@ -65,18 +65,15 @@ public unsafe ref struct UnmanagedSimaiParseResult
     }
 
     /// <summary>
-    /// Frees the memory owned by the result.
+    /// Frees the memory owned by the result. The parsed file and everything it points to are one block of native
+    /// memory, so it is freed with one call.
     /// </summary>
     public void Free()
     {
         Marshal.FreeHGlobal((nint)errorMsg);
         Marshal.FreeHGlobal((nint)errorContent);
-        if (simaiFile is not null)
-        {
-            ((UnmanagedSimaiFile*)simaiFile)->Free();
-            Marshal.FreeHGlobal((nint)simaiFile);
-            simaiFile = null;
-        }
+        Marshal.FreeHGlobal((nint)simaiFile);
+        simaiFile = null;
         errorMsg = null;
         errorContent = null;
         code = -1;

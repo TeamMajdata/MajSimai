@@ -23,18 +23,5 @@ internal unsafe struct UnmanagedSimaiCommand
     /// <summary>The field value.</summary>
     [NativeString(nameof(valueLen))]
     public byte* value;
-
-    /// <summary>
-    /// Frees the memory owned by the command.
-    /// </summary>
-    public void Free()
-    {
-        Marshal.FreeHGlobal((nint)prefix);
-        Marshal.FreeHGlobal((nint)value);
-        prefix = null;
-        value = null;
-        prefixLen = 0;
-        valueLen = 0;
-    }
 }
 #endif

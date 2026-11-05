@@ -149,6 +149,27 @@ public sealed class SimaiChart
     }
 
     /// <summary>
+    /// Gets the values of the comma timing points while their objects are not created yet, so a caller that only reads
+    /// the values, such as the native converter, does not create one object per comma. Each value matches the object
+    /// <see cref="CommaTimings"/> would create: no notes and an empty raw content.
+    /// </summary>
+    /// <param name="commaData">Receives the values, or an empty span when the method returns <see langword="false"/>.</param>
+    /// <returns>
+    /// <see langword="true"/> when the objects are not created yet; <see langword="false"/> when they are, or when the
+    /// chart was created with timing point objects, and <see cref="CommaTimings"/> must be read instead.
+    /// </returns>
+    internal bool TryGetCommaData(out ReadOnlySpan<CommaTiming> commaData)
+    {
+        if (Volatile.Read(ref _commaTimings) is null)
+        {
+            commaData = _commaData;
+            return true;
+        }
+        commaData = ReadOnlySpan<CommaTiming>.Empty;
+        return false;
+    }
+
+    /// <summary>
     /// Creates the comma timing point objects from their stored values. When several threads race, all of them return
     /// the array that was stored first.
     /// </summary>

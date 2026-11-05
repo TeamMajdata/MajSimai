@@ -77,18 +77,5 @@ internal unsafe struct UnmanagedSimaiNote
     /// </summary>
     [NativeArray(nameof(relatedNotesLen))]
     public int* relatedNotes;
-
-    /// <summary>
-    /// Frees the memory owned by the note.
-    /// </summary>
-    public void Free()
-    {
-        Marshal.FreeHGlobal((nint)rawContent);
-        Marshal.FreeHGlobal((nint)relatedNotes);
-        rawContent = null;
-        rawContentLen = 0;
-        relatedNotes = null;
-        relatedNotesLen = 0;
-    }
 }
 #endif

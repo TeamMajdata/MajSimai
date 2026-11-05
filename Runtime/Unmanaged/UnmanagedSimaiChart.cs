@@ -47,46 +47,5 @@ internal unsafe struct UnmanagedSimaiChart
     /// <summary>The timing points of the commas.</summary>
     [NativeArray(nameof(commaTimingsLen))]
     public UnmanagedSimaiTimingPoint* commaTimings;
-
-    /// <summary>
-    /// Frees the memory owned by the chart and its timing points.
-    /// </summary>
-    public void Free()
-    {
-        Marshal.FreeHGlobal((nint)level);
-        Marshal.FreeHGlobal((nint)designer);
-        Marshal.FreeHGlobal((nint)fumen);
-        FreeTimings(noteTimings, noteTimingsLen);
-        FreeTimings(commaTimings, commaTimingsLen);
-        level = null;
-        levelLen = 0;
-        designer = null;
-        designerLen = 0;
-        fumen = null;
-        fumenLen = 0;
-        isEmpty = true;
-        noteTimings = null;
-        noteTimingsLen = 0;
-        commaTimings = null;
-        commaTimingsLen = 0;
-    }
-
-    /// <summary>
-    /// Frees native timing points and the array that holds them.
-    /// </summary>
-    /// <param name="timings">The array, or null.</param>
-    /// <param name="length">The number of timing points.</param>
-    private static void FreeTimings(UnmanagedSimaiTimingPoint* timings, int length)
-    {
-        if (timings is null)
-        {
-            return;
-        }
-        for (var i = 0; i < length; i++)
-        {
-            (timings + i)->Free();
-        }
-        Marshal.FreeHGlobal((nint)timings);
-    }
 }
 #endif
