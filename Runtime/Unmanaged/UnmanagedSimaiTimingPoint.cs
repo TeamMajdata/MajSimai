@@ -9,7 +9,7 @@ namespace MajSimai.Unmanaged;
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiTimingPoint
 {
-    /// <summary>The time in seconds.</summary>
+    /// <summary>The time in seconds from the start of the chart.</summary>
     public double timing;
 
     /// <summary>The BPM in effect.</summary>
@@ -33,17 +33,19 @@ internal unsafe struct UnmanagedSimaiTimingPoint
     /// <summary>The number of items in <see cref="notes"/>.</summary>
     public int notesLen;
 
-    /// <summary>The length of <see cref="rawContent"/>.</summary>
+    /// <summary>The length of <see cref="rawContent"/> in bytes.</summary>
     public int rawContentLen;
 
     /// <summary>Whether the timing point has no notes.</summary>
     public bool isEmpty;
 
     /// <summary>The notes.</summary>
+    [NativeArray(nameof(notesLen))]
     public UnmanagedSimaiNote* notes;
 
-    /// <summary>The note text as ANSI characters.</summary>
-    public char* rawContent;
+    /// <summary>The note text without whitespace.</summary>
+    [NativeString(nameof(rawContentLen))]
+    public byte* rawContent;
 
     /// <summary>
     /// Frees the memory owned by the timing point and its notes.

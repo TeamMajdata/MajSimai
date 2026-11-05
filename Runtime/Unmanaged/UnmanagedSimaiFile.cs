@@ -9,13 +9,13 @@ namespace MajSimai.Unmanaged;
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiFile
 {
-    /// <summary>The length of <see cref="title"/>.</summary>
+    /// <summary>The length of <see cref="title"/> in bytes.</summary>
     public int titleLen;
 
-    /// <summary>The length of <see cref="artist"/>.</summary>
+    /// <summary>The length of <see cref="artist"/> in bytes.</summary>
     public int artistLen;
 
-    /// <summary>The length of <see cref="finalDesigner"/>.</summary>
+    /// <summary>The length of <see cref="finalDesigner"/> in bytes.</summary>
     public int finalDesignerLen;
 
     /// <summary>The <c>&amp;first</c> offset in seconds.</summary>
@@ -27,19 +27,24 @@ internal unsafe struct UnmanagedSimaiFile
     /// <summary>The number of items in <see cref="commands"/>.</summary>
     public int commandsLen;
 
-    /// <summary>The song title as ANSI characters.</summary>
-    public char* title;
+    /// <summary>The song title.</summary>
+    [NativeString(nameof(titleLen))]
+    public byte* title;
 
-    /// <summary>The song artist as ANSI characters.</summary>
-    public char* artist;
+    /// <summary>The song artist.</summary>
+    [NativeString(nameof(artistLen))]
+    public byte* artist;
 
-    /// <summary>The designer of the file as ANSI characters.</summary>
-    public char* finalDesigner;
+    /// <summary>The designer of the file.</summary>
+    [NativeString(nameof(finalDesignerLen))]
+    public byte* finalDesigner;
 
-    /// <summary>The charts.</summary>
+    /// <summary>The seven charts, <c>&amp;inote_1</c> to <c>&amp;inote_7</c>.</summary>
+    [NativeArray(nameof(chartsLen))]
     public UnmanagedSimaiChart* charts;
 
-    /// <summary>The other fields.</summary>
+    /// <summary>The other fields of the file.</summary>
+    [NativeArray(nameof(commandsLen))]
     public UnmanagedSimaiCommand* commands;
 
     /// <summary>

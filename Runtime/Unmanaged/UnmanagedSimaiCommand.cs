@@ -9,17 +9,19 @@ namespace MajSimai.Unmanaged;
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiCommand
 {
-    /// <summary>The length of <see cref="prefix"/>.</summary>
+    /// <summary>The length of <see cref="prefix"/> in bytes.</summary>
     public int prefixLen;
 
-    /// <summary>The length of <see cref="value"/>.</summary>
+    /// <summary>The length of <see cref="value"/> in bytes.</summary>
     public int valueLen;
 
-    /// <summary>The field name as ANSI characters.</summary>
-    public char* prefix;
+    /// <summary>The field name, without the <c>&amp;</c>.</summary>
+    [NativeString(nameof(prefixLen))]
+    public byte* prefix;
 
-    /// <summary>The field value as ANSI characters.</summary>
-    public char* value;
+    /// <summary>The field value.</summary>
+    [NativeString(nameof(valueLen))]
+    public byte* value;
 
     /// <summary>
     /// Frees the memory owned by the command.

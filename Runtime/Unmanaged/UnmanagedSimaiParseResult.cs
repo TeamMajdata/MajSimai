@@ -15,38 +15,41 @@ public unsafe ref struct UnmanagedSimaiParseResult
     /// <summary>The content was empty.</summary>
     public const int CODE_INVALID_CONTENT = 1;
 
-    /// <summary>The parser failed.</summary>
+    /// <summary>The parser failed for a reason other than the content.</summary>
     public const int CODE_INTERNAL_ERROR = 2;
 
-    /// <summary>The content has malformed markup.</summary>
+    /// <summary>The content has malformed markup, such as a malformed note.</summary>
     public const int CODE_INVALID_SIMAI_MARKUP = 3;
 
-    /// <summary>The content has a malformed declaration.</summary>
+    /// <summary>The content has a malformed declaration, such as a BPM change that is not closed.</summary>
     public const int CODE_INVALID_SIMAI_SYNTAX = 4;
 
     /// <summary>One of the <c>CODE_</c> constants.</summary>
     public required int code;
 
-    /// <summary>The line of the error, or -1.</summary>
+    /// <summary>The line of the error, starting from 1, or -1.</summary>
     public int errorAtLine = -1;
 
     /// <summary>The column of the error, or -1.</summary>
     public int errorAtColumn = -1;
 
-    /// <summary>The length of <see cref="errorMsgAnsi"/>.</summary>
+    /// <summary>The length of <see cref="errorMsg"/> in bytes.</summary>
     public int errorMsgLen = 0;
 
-    /// <summary>The length of <see cref="errorContentAnsi"/>.</summary>
+    /// <summary>The length of <see cref="errorContent"/> in bytes.</summary>
     public int errorContentLen = 0;
 
-    /// <summary>The parsed file (an <c>UnmanagedSimaiFile</c>), or null when parsing failed.</summary>
+    /// <summary>The parsed file, or null when parsing failed.</summary>
+    [NativePointee(typeof(UnmanagedSimaiFile))]
     public void* simaiFile = null;
 
-    /// <summary>The error message as ANSI characters, or null.</summary>
-    public char* errorMsgAnsi = null;
+    /// <summary>The description of the error, or null when parsing succeeded.</summary>
+    [NativeString(nameof(errorMsgLen))]
+    public byte* errorMsg = null;
 
-    /// <summary>The text the error is about as ANSI characters, or null.</summary>
-    public char* errorContentAnsi = null;
+    /// <summary>The text the error is about, or null.</summary>
+    [NativeString(nameof(errorContentLen))]
+    public byte* errorContent = null;
 
     /// <summary>
     /// Creates an empty result.
@@ -60,16 +63,16 @@ public unsafe ref struct UnmanagedSimaiParseResult
     /// </summary>
     public void Free()
     {
-        Marshal.FreeHGlobal((nint)errorMsgAnsi);
-        Marshal.FreeHGlobal((nint)errorContentAnsi);
+        Marshal.FreeHGlobal((nint)errorMsg);
+        Marshal.FreeHGlobal((nint)errorContent);
         if (simaiFile is not null)
         {
             ((UnmanagedSimaiFile*)simaiFile)->Free();
             Marshal.FreeHGlobal((nint)simaiFile);
             simaiFile = null;
         }
-        errorMsgAnsi = null;
-        errorContentAnsi = null;
+        errorMsg = null;
+        errorContent = null;
         code = -1;
         errorAtLine = -1;
         errorAtColumn = -1;

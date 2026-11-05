@@ -1,6 +1,9 @@
 using System.Runtime.CompilerServices;
 using MajSimai.Logging;
 
+// Calls to the native entry points through unmanaged function pointers pass bool as 1 byte, the way native callers do.
+[assembly: DisableRuntimeMarshalling]
+
 namespace MajSimai.Tests;
 
 /// <summary>

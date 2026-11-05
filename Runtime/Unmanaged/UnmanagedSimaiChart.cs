@@ -9,13 +9,13 @@ namespace MajSimai.Unmanaged;
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiChart
 {
-    /// <summary>The length of <see cref="level"/>.</summary>
+    /// <summary>The length of <see cref="level"/> in bytes.</summary>
     public int levelLen;
 
-    /// <summary>The length of <see cref="designer"/>.</summary>
+    /// <summary>The length of <see cref="designer"/> in bytes.</summary>
     public int designerLen;
 
-    /// <summary>The length of <see cref="fumen"/>.</summary>
+    /// <summary>The length of <see cref="fumen"/> in bytes.</summary>
     public int fumenLen;
 
     /// <summary>The number of items in <see cref="noteTimings"/>.</summary>
@@ -27,19 +27,24 @@ internal unsafe struct UnmanagedSimaiChart
     /// <summary>Whether the chart has no note timing points.</summary>
     public bool isEmpty;
 
-    /// <summary>The level text as ANSI characters.</summary>
-    public char* level;
+    /// <summary>The level text.</summary>
+    [NativeString(nameof(levelLen))]
+    public byte* level;
 
-    /// <summary>The designer as ANSI characters.</summary>
-    public char* designer;
+    /// <summary>The designer of the chart.</summary>
+    [NativeString(nameof(designerLen))]
+    public byte* designer;
 
-    /// <summary>The chart text as ANSI characters.</summary>
-    public char* fumen;
+    /// <summary>The chart text.</summary>
+    [NativeString(nameof(fumenLen))]
+    public byte* fumen;
 
-    /// <summary>The note timing points.</summary>
+    /// <summary>The timing points that have notes.</summary>
+    [NativeArray(nameof(noteTimingsLen))]
     public UnmanagedSimaiTimingPoint* noteTimings;
 
-    /// <summary>The comma timing points.</summary>
+    /// <summary>The timing points of the commas.</summary>
+    [NativeArray(nameof(commaTimingsLen))]
     public UnmanagedSimaiTimingPoint* commaTimings;
 
     /// <summary>

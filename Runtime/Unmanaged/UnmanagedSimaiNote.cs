@@ -60,16 +60,21 @@ internal unsafe struct UnmanagedSimaiNote
     /// <summary>Whether the star is drawn as a double star.</summary>
     public bool isStarDouble;
 
-    /// <summary>The length of <see cref="rawContent"/>.</summary>
+    /// <summary>The length of <see cref="rawContent"/> in bytes.</summary>
     public int rawContentLen;
 
     /// <summary>The number of items in <see cref="relatedNotes"/>.</summary>
     public int relatedNotesLen;
 
-    /// <summary>The note text as ANSI characters.</summary>
-    public char* rawContent;
+    /// <summary>The note text.</summary>
+    [NativeString(nameof(rawContentLen))]
+    public byte* rawContent;
 
-    /// <summary>The indices, in the notes of the same timing point, of <see cref="SimaiNote.RelatedNotes"/>.</summary>
+    /// <summary>
+    /// The indices, in the notes of the same timing point, of <see cref="SimaiNote.RelatedNotes"/>; -1 for a related
+    /// note that is not in the timing point.
+    /// </summary>
+    [NativeArray(nameof(relatedNotesLen))]
     public int* relatedNotes;
 
     /// <summary>
