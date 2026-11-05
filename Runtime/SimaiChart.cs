@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Threading;
 using MajSimai.Parsing;
+using MajSimai.Utils;
 
 namespace MajSimai;
 
@@ -32,6 +33,11 @@ public sealed class SimaiChart
     /// The comma timing points, or null until they are first read.
     /// </summary>
     private SimaiTimingPoint[]? _commaTimings;
+
+    /// <summary>
+    /// The MD5 and SHA-256 hashes of the chart text, or null until they are first read.
+    /// </summary>
+    private ContentHashes? _hashes;
 
     /// <summary>
     /// Creates a chart without comma timing points.
@@ -130,6 +136,25 @@ public sealed class SimaiChart
     public ReadOnlySpan<SimaiTimingPoint> CommaTimings => _commaTimings ?? CreateCommaTimings();
 
     /// <summary>
+    /// Gets the MD5 hash of the chart text as a lowercase hex string.
+    /// </summary>
+    /// <remarks>
+    /// The text is hashed as one line: every white-space character (<see cref="char.IsWhiteSpace(char)"/>), line breaks
+    /// included, is removed, and the UTF-8 bytes of what is left are hashed. Charts that differ only in white space have
+    /// the same hash. The hash is computed on first access, which is thread safe.
+    /// </remarks>
+    public string Md5 => GetHashes().Md5;
+
+    /// <summary>
+    /// Gets the SHA-256 hash of the chart text as a lowercase hex string.
+    /// </summary>
+    /// <remarks>
+    /// The text is hashed the same way as for <see cref="Md5"/>: as one line without white space, in UTF-8. The hash is
+    /// computed on first access, which is thread safe.
+    /// </remarks>
+    public string Sha256 => GetHashes().Sha256;
+
+    /// <summary>
     /// Creates a parsed chart that keeps the given arrays instead of copying them.
     /// </summary>
     /// <param name="level">The level text.</param>
@@ -182,6 +207,23 @@ public sealed class SimaiChart
         }
 
         return Interlocked.CompareExchange(ref _commaTimings, timings, null) ?? timings;
+    }
+
+    /// <summary>
+    /// Gets the hashes of the chart text, computing them on first use. When several threads race, all of them return
+    /// the value that was stored first.
+    /// </summary>
+    /// <returns>The hashes of <see cref="Fumen"/> without white space.</returns>
+    private ContentHashes GetHashes()
+    {
+        var hashes = Volatile.Read(ref _hashes);
+        if (hashes is not null)
+        {
+            return hashes;
+        }
+        hashes = ContentHashes.FromFumen(Fumen.AsSpan());
+
+        return Interlocked.CompareExchange(ref _hashes, hashes, null) ?? hashes;
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using MajSimai.Utils;
 
 namespace MajSimai;
 
@@ -34,7 +35,13 @@ public readonly struct SimaiMetadata
     private readonly SimaiCommand[] _commands;
 
     /// <summary>
-    /// Creates metadata from sequences. Only the first seven designers, levels and charts are kept.
+    /// The MD5 and SHA-256 hashes of the file, or <see langword="null"/> for a default value.
+    /// </summary>
+    private readonly ContentHashes? _hashes;
+
+    /// <summary>
+    /// Creates metadata from sequences. Only the first seven designers, levels and charts are kept. There are no file
+    /// bytes to hash, so <see cref="Md5"/> and <see cref="Sha256"/> are empty.
     /// </summary>
     /// <param name="title">The song title.</param>
     /// <param name="artist">The song artist.</param>
@@ -74,10 +81,12 @@ public readonly struct SimaiMetadata
         _levels = TakeSeven(levels);
         _fumens = TakeSeven(fumens);
         _commands = commands is null ? Array.Empty<SimaiCommand>() : new List<SimaiCommand>(commands).ToArray();
+        _hashes = ContentHashes.None;
     }
 
     /// <summary>
-    /// Creates metadata from spans. Only the first seven designers, levels and charts are kept.
+    /// Creates metadata from spans. Only the first seven designers, levels and charts are kept. There are no file bytes
+    /// to hash, so <see cref="Md5"/> and <see cref="Sha256"/> are empty.
     /// </summary>
     /// <param name="title">The song title.</param>
     /// <param name="artist">The song artist.</param>
@@ -106,6 +115,7 @@ public readonly struct SimaiMetadata
                TakeSeven(fumens),
                commands.IsEmpty ? Array.Empty<SimaiCommand>() : commands.ToArray(),
                hash ?? throw new ArgumentNullException(nameof(hash)),
+               ContentHashes.None,
                finalDesigner)
     {
     }
@@ -121,6 +131,7 @@ public readonly struct SimaiMetadata
                           string[] fumens,
                           SimaiCommand[] commands,
                           string hash,
+                          ContentHashes hashes,
                           string finalDesigner)
     {
         Title = title;
@@ -131,6 +142,7 @@ public readonly struct SimaiMetadata
         _fumens = fumens;
         _commands = commands;
         Hash = hash;
+        _hashes = hashes;
         FinalDesigner = finalDesigner;
     }
 
@@ -180,6 +192,25 @@ public readonly struct SimaiMetadata
     public string Hash { get; }
 
     /// <summary>
+    /// Gets the MD5 hash of the file as a lowercase hex string.
+    /// </summary>
+    /// <remarks>
+    /// Read from a stream, it is the hash of the original bytes and matches <see cref="Hash"/>, which is the same MD5 in
+    /// Base64. Read from text, it is the hash of the UTF-8 bytes of the text. Metadata created with a constructor has an
+    /// empty string.
+    /// </remarks>
+    public string Md5 => (_hashes ?? ContentHashes.None).Md5;
+
+    /// <summary>
+    /// Gets the SHA-256 hash of the file as a lowercase hex string, from the same bytes as <see cref="Md5"/>.
+    /// </summary>
+    /// <remarks>
+    /// Read from a stream, it is the hash of the original bytes. Read from text, it is the hash of the UTF-8 bytes of the
+    /// text. Metadata created with a constructor has an empty string.
+    /// </remarks>
+    public string Sha256 => (_hashes ?? ContentHashes.None).Sha256;
+
+    /// <summary>
     /// Creates metadata that keeps the given arrays instead of copying them.
     /// </summary>
     /// <param name="title">The song title.</param>
@@ -190,6 +221,7 @@ public readonly struct SimaiMetadata
     /// <param name="fumens">Seven chart texts; the array must not be changed afterwards.</param>
     /// <param name="commands">The other fields; the array must not be changed afterwards.</param>
     /// <param name="hash">The hash of the file content.</param>
+    /// <param name="hashes">The MD5 and SHA-256 hashes of the file.</param>
     /// <param name="finalDesigner">The designer shown for the whole file.</param>
     /// <returns>The metadata.</returns>
     internal static SimaiMetadata Create(string title,
@@ -200,9 +232,10 @@ public readonly struct SimaiMetadata
                                          string[] fumens,
                                          SimaiCommand[] commands,
                                          string hash,
+                                         ContentHashes hashes,
                                          string finalDesigner)
     {
-        return new SimaiMetadata(title, artist, offset, designers, levels, fumens, commands, hash, finalDesigner);
+        return new SimaiMetadata(title, artist, offset, designers, levels, fumens, commands, hash, hashes, finalDesigner);
     }
 
     /// <summary>

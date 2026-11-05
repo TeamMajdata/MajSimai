@@ -5,6 +5,7 @@ using System.Text;
 using System.Threading.Tasks;
 using MajSimai.Logging;
 using MajSimai.Parsing;
+using MajSimai.Utils;
 
 namespace MajSimai;
 
@@ -31,7 +32,8 @@ public static class SimaiParser
     #region Parse
 
     /// <summary>
-    /// Parses simai text into a <see cref="SimaiFile"/>.
+    /// Parses simai text into a <see cref="SimaiFile"/>. <see cref="SimaiFile.Md5"/> and <see cref="SimaiFile.Sha256"/>
+    /// are the hashes of the UTF-8 bytes of the text.
     /// </summary>
     /// <param name="content">The simai text.</param>
     /// <param name="hash">The hash to store in the result.</param>
@@ -73,7 +75,8 @@ public static class SimaiParser
 
     /// <summary>
     /// Reads a stream to its end with UTF-8 (or the encoding of its byte order mark) and parses it into a
-    /// <see cref="SimaiFile"/>. The hash is the Base64 MD5 hash of the bytes.
+    /// <see cref="SimaiFile"/>. The hash is the Base64 MD5 hash of the bytes, and <see cref="SimaiFile.Md5"/>
+    /// and <see cref="SimaiFile.Sha256"/> are the hex MD5 and SHA-256 hashes of the same bytes.
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
     /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
@@ -87,7 +90,8 @@ public static class SimaiParser
 
     /// <summary>
     /// Reads a stream to its end with <paramref name="encoding"/> (or the encoding of its byte order mark) and parses it
-    /// into a <see cref="SimaiFile"/>. The hash is the Base64 MD5 hash of the bytes.
+    /// into a <see cref="SimaiFile"/>. The hash is the Base64 MD5 hash of the bytes, and <see cref="SimaiFile.Md5"/>
+    /// and <see cref="SimaiFile.Sha256"/> are the hex MD5 and SHA-256 hashes of the same bytes.
     /// </summary>
     /// <param name="contentStream">The stream holding the file.</param>
     /// <param name="encoding">The encoding of the text.</param>
@@ -99,7 +103,7 @@ public static class SimaiParser
     {
         using var content = ContentDecoder.Decode(contentStream, encoding);
 
-        return Parse(content.Span, content.Hash, options);
+        return Parse(ParseMetadata(content.Span, content.Hash, content.Hashes, options), options);
     }
 
     /// <summary>
@@ -190,8 +194,9 @@ public static class SimaiParser
     public static async Task<SimaiFile> ParseAsync(Stream contentStream, Encoding encoding, SimaiParserOptions? options = null)
     {
         using var content = await ContentDecoder.DecodeAsync(contentStream, encoding).ConfigureAwait(false);
+        var metadata = await ParseMetadataAsync(content.Memory, content.Hash, content.Hashes, options).ConfigureAwait(false);
 
-        return await ParseAsync(content.Memory, content.Hash, options).ConfigureAwait(false);
+        return await ParseAsync(metadata, options).ConfigureAwait(false);
     }
 
     #endregion
@@ -200,6 +205,8 @@ public static class SimaiParser
 
     /// <summary>
     /// Reads the fields of simai text into <see cref="SimaiMetadata"/>. The notes are not parsed.
+    /// <see cref="SimaiMetadata.Md5"/> and <see cref="SimaiMetadata.Sha256"/> are the hashes of the UTF-8 bytes of the
+    /// text.
     /// </summary>
     /// <param name="content">The simai text.</param>
     /// <param name="hash">The hash to store in the result.</param>
@@ -209,7 +216,27 @@ public static class SimaiParser
     /// <exception cref="InvalidSimaiMarkupException">Thrown when a line starting with <c>&amp;</c> has no <c>=</c>.</exception>
     public static SimaiMetadata ParseMetadata(ReadOnlySpan<char> content, string hash, SimaiParserOptions? options = null)
     {
-        return MetadataReader.Read(content, hash, SyntaxReporter.For(options));
+        if (hash is null)
+        {
+            throw new ArgumentNullException(nameof(hash));
+        }
+
+        return ParseMetadata(content, hash, ContentHashes.FromText(content), options);
+    }
+
+    /// <summary>
+    /// Reads the fields of simai text into <see cref="SimaiMetadata"/> with hashes that are already computed.
+    /// </summary>
+    /// <param name="content">The simai text.</param>
+    /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="hashes">The MD5 and SHA-256 hashes to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
+    /// <returns>The metadata.</returns>
+    /// <exception cref="ArgumentNullException">Thrown when <paramref name="hash"/> is <see langword="null"/>.</exception>
+    /// <exception cref="InvalidSimaiMarkupException">Thrown when a line starting with <c>&amp;</c> has no <c>=</c>.</exception>
+    private static SimaiMetadata ParseMetadata(ReadOnlySpan<char> content, string hash, ContentHashes hashes, SimaiParserOptions? options)
+    {
+        return MetadataReader.Read(content, hash, hashes, SyntaxReporter.For(options));
     }
 
     /// <summary>
@@ -237,7 +264,7 @@ public static class SimaiParser
     {
         using var content = ContentDecoder.Decode(contentStream, encoding);
 
-        return ParseMetadata(content.Span, content.Hash, options);
+        return ParseMetadata(content.Span, content.Hash, content.Hashes, options);
     }
 
     /// <summary>
@@ -287,7 +314,24 @@ public static class SimaiParser
     {
         using var content = await ContentDecoder.DecodeAsync(contentStream, encoding).ConfigureAwait(false);
 
-        return await ParseMetadataAsync(content.Memory, content.Hash, options).ConfigureAwait(false);
+        return await ParseMetadataAsync(content.Memory, content.Hash, content.Hashes, options).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads the fields of simai text into <see cref="SimaiMetadata"/> on the thread pool, with hashes that are already
+    /// computed.
+    /// </summary>
+    /// <param name="content">The simai text; it must not change until the task completes.</param>
+    /// <param name="hash">The hash to store in the result.</param>
+    /// <param name="hashes">The MD5 and SHA-256 hashes to store in the result.</param>
+    /// <param name="options">The parser options; <see langword="null"/> uses <see cref="SimaiParserOptions.Lenient"/>.</param>
+    /// <returns>A task that returns the metadata.</returns>
+    private static Task<SimaiMetadata> ParseMetadataAsync(ReadOnlyMemory<char> content,
+                                                          string hash,
+                                                          ContentHashes hashes,
+                                                          SimaiParserOptions? options)
+    {
+        return Task.Run(() => ParseMetadata(content.Span, hash, hashes, options));
     }
 
     #endregion

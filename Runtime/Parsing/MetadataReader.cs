@@ -20,6 +20,7 @@ internal static class MetadataReader
     /// </summary>
     /// <param name="content">The simai text.</param>
     /// <param name="hash">The hash of the file content.</param>
+    /// <param name="hashes">The MD5 and SHA-256 hashes of the file.</param>
     /// <param name="reporter">Decides what happens when a field breaks the grammar.</param>
     /// <param name="chartLines">When not <see langword="null"/>, receives for each chart the line of the file where its
     /// trimmed text starts.</param>
@@ -27,7 +28,11 @@ internal static class MetadataReader
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="hash"/> is <see langword="null"/>.</exception>
     /// <exception cref="InvalidSimaiMarkupException">Thrown in strict mode when a line starting with <c>&amp;</c> has no <c>=</c>.</exception>
     /// <exception cref="InvalidSimaiSyntaxException">Thrown in strict mode when <c>&amp;first</c> is not a number.</exception>
-    public static SimaiMetadata Read(ReadOnlySpan<char> content, string hash, SyntaxReporter reporter, int[]? chartLines = null)
+    public static SimaiMetadata Read(ReadOnlySpan<char> content,
+                                    string hash,
+                                    ContentHashes hashes,
+                                    SyntaxReporter reporter,
+                                    int[]? chartLines = null)
     {
         if (hash is null)
         {
@@ -122,7 +127,7 @@ internal static class MetadataReader
             }
         }
 
-        return SimaiMetadata.Create(title, artist, offset, designers, levels, fumens, commands.ToArray(), hash, finalDesigner);
+        return SimaiMetadata.Create(title, artist, offset, designers, levels, fumens, commands.ToArray(), hash, hashes, finalDesigner);
     }
 
     /// <summary>

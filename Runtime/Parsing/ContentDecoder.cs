@@ -1,15 +1,16 @@
 using System;
 using System.Buffers;
 using System.IO;
-using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using MajSimai.Utils;
 
 namespace MajSimai.Parsing;
 
 /// <summary>
-/// Reads a simai file from a stream: computes the MD5 hash of its bytes and decodes them into rented characters.
+/// Reads a simai file from a stream: computes the MD5 and SHA-256 hashes of its bytes and decodes them into rented
+/// characters.
 /// </summary>
 internal static class ContentDecoder
 {
@@ -18,7 +19,7 @@ internal static class ContentDecoder
     /// </summary>
     /// <param name="stream">The stream holding the file.</param>
     /// <param name="encoding">The encoding to use when the bytes have no byte order mark.</param>
-    /// <returns>The decoded text and the Base64 MD5 hash of the bytes. Dispose the result to return its buffer.</returns>
+    /// <returns>The decoded text and the hashes of the bytes. Dispose the result to return its buffer.</returns>
     /// <exception cref="ArgumentNullException">Thrown when an argument is <see langword="null"/>.</exception>
     public static DecodedContent Decode(Stream stream, Encoding encoding)
     {
@@ -40,7 +41,7 @@ internal static class ContentDecoder
     /// <param name="stream">The stream holding the file.</param>
     /// <param name="encoding">The encoding to use when the bytes have no byte order mark.</param>
     /// <param name="cancellationToken">Cancels the read.</param>
-    /// <returns>The decoded text and the Base64 MD5 hash of the bytes. Dispose the result to return its buffer.</returns>
+    /// <returns>The decoded text and the hashes of the bytes. Dispose the result to return its buffer.</returns>
     /// <exception cref="ArgumentNullException">Thrown when an argument is <see langword="null"/>.</exception>
     public static async Task<DecodedContent> DecodeAsync(Stream stream, Encoding encoding, CancellationToken cancellationToken = default)
     {
@@ -158,11 +159,7 @@ internal static class ContentDecoder
     /// </summary>
     private static DecodedContent DecodeBytes(byte[] bytes, int length, Encoding encoding)
     {
-        string hash;
-        using (var md5 = MD5.Create())
-        {
-            hash = Convert.ToBase64String(md5.ComputeHash(bytes, 0, length));
-        }
+        var hashes = ContentHashes.FromBytes(bytes.AsSpan(0, length));
         using var memory = new MemoryStream(bytes, 0, length, false);
         using var reader = new StreamReader(memory, encoding, true);
         var chars = ArrayPool<char>.Shared.Rent(Math.Max(length, 16));
@@ -192,12 +189,12 @@ internal static class ContentDecoder
             throw;
         }
 
-        return new DecodedContent(chars, charCount, hash);
+        return new DecodedContent(chars, charCount, hashes);
     }
 }
 
 /// <summary>
-/// Text decoded from a stream, held in a rented array, with the hash of the original bytes.
+/// Text decoded from a stream, held in a rented array, with the hashes of the original bytes.
 /// </summary>
 internal readonly struct DecodedContent : IDisposable
 {
@@ -211,19 +208,22 @@ internal readonly struct DecodedContent : IDisposable
     /// </summary>
     /// <param name="buffer">The rented array holding the text.</param>
     /// <param name="length">The length of the text.</param>
-    /// <param name="hash">The Base64 MD5 hash of the bytes.</param>
-    public DecodedContent(char[] buffer, int length, string hash)
+    /// <param name="hashes">The hashes of the bytes.</param>
+    public DecodedContent(char[] buffer, int length, ContentHashes hashes)
     {
         _buffer = buffer;
         Length = length;
-        Hash = hash;
+        Hashes = hashes;
     }
 
     /// <summary>Gets the length of the text.</summary>
     public int Length { get; }
 
     /// <summary>Gets the Base64 MD5 hash of the bytes.</summary>
-    public string Hash { get; }
+    public string Hash => Hashes.Md5Base64;
+
+    /// <summary>Gets the MD5 and SHA-256 hashes of the bytes.</summary>
+    public ContentHashes Hashes { get; }
 
     /// <summary>Gets the text as a span.</summary>
     public ReadOnlySpan<char> Span => _buffer.AsSpan(0, Length);

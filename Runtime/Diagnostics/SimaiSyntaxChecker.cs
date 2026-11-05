@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using MajSimai.Parsing;
+using MajSimai.Utils;
 
 namespace MajSimai.Diagnostics;
 
@@ -34,7 +35,7 @@ public static class SimaiSyntaxChecker
     {
         var diagnostics = new List<SimaiDiagnostic>();
         var chartLines = new int[SimaiMetadata.ChartCount];
-        var metadata = MetadataReader.Read(content, string.Empty, new SyntaxReporter(diagnostics, null, 0), chartLines);
+        var metadata = MetadataReader.Read(content, string.Empty, ContentHashes.None, new SyntaxReporter(diagnostics, null, 0), chartLines);
         var fumens = metadata.Fumens;
         for (var i = 0; i < fumens.Length; i++)
         {

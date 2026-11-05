@@ -20,7 +20,7 @@ public sealed class SimaiFile
 
     /// <summary>
     /// Creates a simai file. Missing charts are filled with <see cref="SimaiChart.Empty"/>, and only the first seven
-    /// charts are kept.
+    /// charts are kept. There are no file bytes to hash, so <see cref="Md5"/> and <see cref="Sha256"/> start empty.
     /// </summary>
     /// <param name="title">The song title.</param>
     /// <param name="artist">The song artist.</param>
@@ -42,6 +42,8 @@ public sealed class SimaiFile
         FinalDesigner = finalDesigner ?? string.Empty;
         Offset = offset;
         Hash = hash ?? string.Empty;
+        Md5 = string.Empty;
+        Sha256 = string.Empty;
         _charts.AsSpan().Fill(SimaiChart.Empty);
         if (levels is not null)
         {
@@ -73,6 +75,8 @@ public sealed class SimaiFile
         FinalDesigner = metadata.FinalDesigner ?? string.Empty;
         Offset = metadata.Offset;
         Hash = metadata.Hash ?? string.Empty;
+        Md5 = metadata.Md5;
+        Sha256 = metadata.Sha256;
         _charts.AsSpan().Fill(SimaiChart.Empty);
         charts.Slice(0, Math.Min(charts.Length, _charts.Length)).CopyTo(_charts);
         var commands = metadata.Commands;
@@ -112,6 +116,25 @@ public sealed class SimaiFile
     /// Gets or sets the hash of the file content.
     /// </summary>
     public string Hash { get; set; }
+
+    /// <summary>
+    /// Gets or sets the MD5 hash of the file as a lowercase hex string.
+    /// </summary>
+    /// <remarks>
+    /// A file parsed from a stream has the hash of the original bytes, which matches <see cref="Hash"/> (the same MD5 in
+    /// Base64). A file parsed from text has the hash of the UTF-8 bytes of the text. A file created with the constructor
+    /// starts with an empty string.
+    /// </remarks>
+    public string Md5 { get; set; }
+
+    /// <summary>
+    /// Gets or sets the SHA-256 hash of the file as a lowercase hex string, from the same bytes as <see cref="Md5"/>.
+    /// </summary>
+    /// <remarks>
+    /// A file parsed from a stream has the hash of the original bytes. A file parsed from text has the hash of the UTF-8
+    /// bytes of the text. A file created with the constructor starts with an empty string.
+    /// </remarks>
+    public string Sha256 { get; set; }
 
     /// <summary>
     /// Gets the other fields of the file, in text order.
