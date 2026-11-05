@@ -104,7 +104,7 @@ public sealed class SyntaxErrorTests
         }
         var lenient = SimaiParser.ParseChart(fumen.AsSpan());
         Assert.Equal(2000, lenient.NoteTimings.Length);
-        Assert.Equal(1, lenient.NoteTimings[700].Notes.Length);
+        Assert.Single(lenient.NoteTimings[700].Notes);
     }
 
     /// <summary>
