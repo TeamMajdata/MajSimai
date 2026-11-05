@@ -99,7 +99,7 @@ var simaiChart = await SimaiParser.ParseChartAsync(fumen);
 
 ```
 
-## Note model (3.0)
+## Note model
 
 Since 3.0, a slide is read as its star head plus its slide paths (issue #12):
 
