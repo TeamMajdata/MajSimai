@@ -21,6 +21,13 @@
 	  <GeneratePackageOnBuild>False</GeneratePackageOnBuild>
 	  <TargetFrameworks>net7.0;net8.0;net9.0;net10.0</TargetFrameworks>
   </PropertyGroup>
+  <!--
+    The native AOT compiler of .NET 7 does not run on macOS (NETSDK1204), and the restore of a publish covers every
+    target framework, so a native AOT publish on macOS leaves net7.0 out.
+  -->
+  <PropertyGroup Condition="'$(PublishAot)' == 'true' and $([MSBuild]::IsOSPlatform('OSX'))">
+	  <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+  </PropertyGroup>
 
   <ItemGroup>
     <Compile Remove="Tests\**;tools\**" />

@@ -97,7 +97,8 @@ jobs:
   # system, so each package is built on its own platform; --verify links and runs a test program where it can run.
   cpp-package:
     strategy:
-      fail-fast: true
+      # Build every platform even when one fails, so a run reports all failures; publish-cpp still needs all of them.
+      fail-fast: false
       matrix:
         include:
           - rid: win-x64
