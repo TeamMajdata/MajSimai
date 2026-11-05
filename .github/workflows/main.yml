@@ -4,13 +4,51 @@ on:
   push:
     tags:
       - '[0-9]+.[0-9]+.[0-9]+'   # only semantic version tags like 2.2.1
+  # A manual run builds everything like a release, but publishes nothing: it skips the NuGet push, uploads the
+  # packages as artifacts and only does a dry run of the push to MajSimaiCpp.
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'The version to build, such as 3.0.1-test (default: the version in MajSimai.csproj)'
+        required: false
+        default: ''
 
 permissions:
   id-token: write   # required for OIDC
   contents: read
 
 jobs:
+  # The version of this run: the tag of a release, or the version given to a manual run.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Find the version
+        id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            VERSION="$GITHUB_REF_NAME"
+          elif [ -n "$INPUT_VERSION" ]; then
+            VERSION="$INPUT_VERSION"
+          else
+            VERSION=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' MajSimai.csproj | head -n 1)
+          fi
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$VERSION' is not a version such as 3.0.1 or 3.0.1-test."
+            exit 1
+          fi
+          echo "Version $VERSION ($GITHUB_EVENT_NAME)"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
   build-and-publish:
+    needs: version
     runs-on: ubuntu-latest
 
     steps:
@@ -20,20 +58,30 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore dependencies
         run: dotnet restore
 
       - name: Build and pack
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
           echo "Building version $VERSION"
           dotnet build --configuration Release /p:Version=$VERSION
           dotnet pack --configuration Release --no-build -o ./artifacts /p:Version=$VERSION
 
+      - name: Upload the NuGet packages (manual run)
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nuget-packages
+          path: artifacts/*.nupkg
+          if-no-files-found: error
+
       # Get a short-lived NuGet API key via OIDC
       - name: NuGet login (OIDC → temp API key)
+        if: github.event_name == 'push'
         uses: NuGet/login@v1
         id: login
         with:
@@ -41,4 +89,158 @@ jobs:
 
       # Push all packages using glob pattern
       - name: NuGet push
+        if: github.event_name == 'push'
         run: dotnet nuget push ./artifacts/*.nupkg --api-key ${{ steps.login.outputs.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+  # Publish MajSimai with native AOT as a static library for each platform and package it with the C++ wrapper that
+  # tools/MajSimai.CppGen generates (tools/build-cpp-package.py). Native AOT cannot cross-compile to another operating
+  # system, so each package is built on its own platform; --verify links and runs a test program where it can run.
+  cpp-package:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - rid: win-x64
+            os: windows-latest
+            verify: true
+          - rid: win-arm64      # cross-compiled on x64, so the test program cannot run
+            os: windows-latest
+            verify: false
+          - rid: linux-x64
+            os: ubuntu-24.04
+            verify: true
+          - rid: linux-arm64
+            os: ubuntu-24.04-arm
+            verify: true
+          - rid: osx-x64
+            os: macos-15-intel
+            verify: true
+          - rid: osx-arm64
+            os: macos-latest
+            verify: true
+    needs: version
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install the native AOT prerequisites (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang zlib1g-dev
+
+      # Native AOT finds the Visual Studio C++ tools with vswhere.exe on the path.
+      - name: Add vswhere to the path (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Add-Content -Path $env:GITHUB_PATH -Value "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer"
+
+      - name: Build the static C++ package
+        shell: bash
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          python tools/build-cpp-package.py --kind static --rid "${{ matrix.rid }}" \
+            --version "$VERSION" --output "artifacts/cpp/${{ matrix.rid }}" \
+            ${{ matrix.verify && '--verify' || '' }}
+
+      - name: Upload the C++ package
+        uses: actions/upload-artifact@v4
+        with:
+          name: majsimai-cpp-${{ matrix.rid }}
+          path: artifacts/cpp/${{ matrix.rid }}
+          if-no-files-found: error
+
+  # Replace the content of TeamMajdata/MajSimaiCpp with the packages, commit it and tag it with the version of MajSimai.
+  # Needs the secret MAJSIMAICPP_TOKEN: a token that can push to TeamMajdata/MajSimaiCpp (contents: write).
+  # A manual run does all of it but the push, which is a dry run that still checks the token can push.
+  publish-cpp:
+    needs: [version, build-and-publish, cpp-package]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          path: MajSimai
+
+      - name: Checkout MajSimaiCpp
+        uses: actions/checkout@v4
+        with:
+          repository: TeamMajdata/MajSimaiCpp
+          ref: main
+          token: ${{ secrets.MAJSIMAICPP_TOKEN }}
+          path: MajSimaiCpp
+
+      - name: Download the C++ packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: majsimai-cpp-*
+          path: packages
+
+      # The README of MajSimaiCpp is maintained in MajSimaiCpp itself, so it is kept.
+      - name: Replace the content of MajSimaiCpp
+        run: |
+          find MajSimaiCpp -mindepth 1 -maxdepth 1 ! -name .git ! -name README.md -exec rm -rf {} +
+          cp MajSimai/tools/MajSimaiCpp/CMakeLists.txt MajSimai/LICENSE MajSimaiCpp/
+          mkdir MajSimaiCpp/packages
+          for package in packages/majsimai-cpp-*; do
+            cp -R "$package" "MajSimaiCpp/packages/${package#packages/majsimai-cpp-}"
+          done
+          ls MajSimaiCpp/packages
+
+      - name: Upload the content of MajSimaiCpp (manual run)
+        if: github.event_name != 'push'
+        uses: actions/upload-artifact@v4
+        with:
+          name: majsimaicpp-content
+          path: |
+            MajSimaiCpp
+            !MajSimaiCpp/.git
+          if-no-files-found: error
+
+      - name: Commit, tag and push MajSimaiCpp
+        working-directory: MajSimaiCpp
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git ls-remote --exit-code --tags origin "refs/tags/$VERSION" > /dev/null; then
+            if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+              echo "::error::MajSimaiCpp already has the tag $VERSION."
+              exit 1
+            fi
+            echo "::warning::MajSimaiCpp already has the tag $VERSION; a release of it would fail."
+            TAG_EXISTS=true
+          fi
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The packages are the same as in MajSimaiCpp; tagging the current commit."
+          else
+            git commit -m "MajSimai $VERSION" -m "Generated from TeamMajdata/MajSimai@$GITHUB_SHA by tools/build-cpp-package.py."
+          fi
+          git tag -a "$VERSION" -m "MajSimai $VERSION"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            git push origin HEAD:main "refs/tags/$VERSION"
+          else
+            echo "Manual run: a dry run of the push, which publishes nothing."
+            git show --stat --format='%H %s' HEAD | head -n 40
+            if [ "${TAG_EXISTS:-false}" = "true" ]; then
+              git push --dry-run origin HEAD:main
+            else
+              git push --dry-run origin HEAD:main "refs/tags/$VERSION"
+            fi
+          fi

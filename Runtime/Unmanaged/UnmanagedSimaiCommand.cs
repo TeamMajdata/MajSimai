@@ -1,29 +1,27 @@
-﻿#if NET7_0_OR_GREATER
-using System;
-using System.Collections.Generic;
-using System.Linq;
+#if NET7_0_OR_GREATER
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace MajSimai.Unmanaged;
+
+/// <summary>
+/// The native layout of a <see cref="SimaiCommand"/>. Its pointers belong to the parse result that holds it and are
+/// freed by <c>MajSimai_Free</c>.
+/// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiCommand
 {
+    /// <summary>The length of <see cref="prefix"/> in bytes.</summary>
     public int prefixLen;
+
+    /// <summary>The length of <see cref="value"/> in bytes.</summary>
     public int valueLen;
 
-    public char* prefix;
-    public char* value;
+    /// <summary>The field name, without the <c>&amp;</c>.</summary>
+    [NativeString(nameof(prefixLen))]
+    public byte* prefix;
 
-    public void Free()
-    {
-        Marshal.FreeHGlobal((nint)prefix);
-        Marshal.FreeHGlobal((nint)value);
-        prefix = null;
-        value = null;
-        prefixLen = 0;
-        valueLen = 0;
-    }
+    /// <summary>The field value.</summary>
+    [NativeString(nameof(valueLen))]
+    public byte* value;
 }
 #endif

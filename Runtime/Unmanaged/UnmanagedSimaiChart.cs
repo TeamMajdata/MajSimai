@@ -1,77 +1,51 @@
-﻿#if NET7_0_OR_GREATER
-using System;
-using System.Collections.Generic;
-using System.Linq;
+#if NET7_0_OR_GREATER
 using System.Runtime.InteropServices;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace MajSimai.Unmanaged;
+
+/// <summary>
+/// The native layout of a <see cref="SimaiChart"/>. Its pointers belong to the parse result that holds it and are freed
+/// by <c>MajSimai_Free</c>.
+/// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiChart
 {
+    /// <summary>The length of <see cref="level"/> in bytes.</summary>
     public int levelLen;
+
+    /// <summary>The length of <see cref="designer"/> in bytes.</summary>
     public int designerLen;
+
+    /// <summary>The length of <see cref="fumen"/> in bytes.</summary>
     public int fumenLen;
+
+    /// <summary>The number of items in <see cref="noteTimings"/>.</summary>
     public int noteTimingsLen;
+
+    /// <summary>The number of items in <see cref="commaTimings"/>.</summary>
     public int commaTimingsLen;
+
+    /// <summary>Whether the chart has no note timing points.</summary>
     public bool isEmpty;
 
-    public char* level;
-    public char* designer;
-    public char* fumen;
+    /// <summary>The level text.</summary>
+    [NativeString(nameof(levelLen))]
+    public byte* level;
+
+    /// <summary>The designer of the chart.</summary>
+    [NativeString(nameof(designerLen))]
+    public byte* designer;
+
+    /// <summary>The chart text.</summary>
+    [NativeString(nameof(fumenLen))]
+    public byte* fumen;
+
+    /// <summary>The timing points that have notes.</summary>
+    [NativeArray(nameof(noteTimingsLen))]
     public UnmanagedSimaiTimingPoint* noteTimings;
+
+    /// <summary>The timing points of the commas.</summary>
+    [NativeArray(nameof(commaTimingsLen))]
     public UnmanagedSimaiTimingPoint* commaTimings;
-    
-
-    public readonly static UnmanagedSimaiChart Empty = new()
-    {
-        level = null,
-        levelLen = 0,
-        designer = null,
-        designerLen = 0,
-        fumen = null,
-        fumenLen = 0,
-        isEmpty = true,
-        noteTimings = null,
-        noteTimingsLen = 0,
-        commaTimings = null,
-        commaTimingsLen = 0,
-    };
-    public void Free()
-    {
-        Marshal.FreeHGlobal((nint)level);
-        Marshal.FreeHGlobal((nint)designer);
-        Marshal.FreeHGlobal((nint)fumen);
-
-        if(noteTimings is not null)
-        {
-            for (var i = 0; i < noteTimingsLen; i++)
-            {
-                (noteTimings + i)->Free();
-            }
-            Marshal.FreeHGlobal((nint)noteTimings);
-        }
-        if(commaTimings is not null)
-        {
-            for(var i = 0;i < commaTimingsLen; i++)
-            {
-                (commaTimings + i)->Free();
-            }
-            Marshal.FreeHGlobal((nint)commaTimings);
-        }
-
-        level = null;
-        levelLen = 0;
-        designer = null;
-        designerLen = 0;
-        fumen = null;
-        fumenLen = 0;
-        isEmpty = true;
-        noteTimings = null;
-        noteTimingsLen = 0;
-        commaTimings = null;
-        commaTimingsLen = 0;
-    }
 }
 #endif
