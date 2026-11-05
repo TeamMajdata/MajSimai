@@ -241,7 +241,8 @@ parsers.
 
 ## Build
 
-If you want to compile MajSimai yourself, please make sure that `dotnet` is installed on your computer.
+If you want to compile MajSimai yourself, please make sure that the .NET 10 SDK (or newer) is installed on your computer:
+MajSimai is written in C# 14.
 
 The target frameworks available for MajSimai are as follows:
 
@@ -251,6 +252,7 @@ The target frameworks available for MajSimai are as follows:
 - `net7.0`
 - `net8.0`
 - `net9.0`
+- `net10.0`
 
 Then, use the following method to compile it:
 
