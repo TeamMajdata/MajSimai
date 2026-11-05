@@ -358,8 +358,8 @@ characters). The native library logs through the default logger, so its warnings
 ## C++ wrapper
 
 `Bindings/Cpp` is a header-only C++17 wrapper generated from the native ABI by `tools/MajSimai.CppGen`, and each release
-publishes it with a static library per platform to [MajSimaiCpp](https://github.com/TeamMajdata/MajSimaiCpp). Its
-README ([`tools/MajSimaiCpp/README.md`](tools/MajSimaiCpp/README.md) here) documents the API, the packages made by
+publishes it with a static library per platform to [MajSimaiCpp](https://github.com/TeamMajdata/MajSimaiCpp). The
+[README of MajSimaiCpp](https://github.com/TeamMajdata/MajSimaiCpp#readme) documents the API, the packages made by
 `tools/build-cpp-package.py`, the release workflow and the rules of the ABI. Regenerate the wrapper after changing
 `Runtime/Unmanaged`; a test fails while `Bindings/Cpp` is out of date:
 

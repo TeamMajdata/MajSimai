@@ -2,7 +2,7 @@
 
   <!--
     Generates the C++ wrapper in Bindings/Cpp from the native ABI of MajSimai (Runtime/Unmanaged).
-    See tools/MajSimaiCpp/README.md (the README of MajSimaiCpp) for how to run it.
+    See the README of MajSimaiCpp (https://github.com/TeamMajdata/MajSimaiCpp) for how to run it.
   -->
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>

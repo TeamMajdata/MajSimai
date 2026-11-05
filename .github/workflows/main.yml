@@ -190,10 +190,11 @@ jobs:
           pattern: majsimai-cpp-*
           path: packages
 
+      # The README of MajSimaiCpp is maintained in MajSimaiCpp itself, so it is kept.
       - name: Replace the content of MajSimaiCpp
         run: |
-          find MajSimaiCpp -mindepth 1 -maxdepth 1 ! -name .git -exec rm -rf {} +
-          cp MajSimai/tools/MajSimaiCpp/CMakeLists.txt MajSimai/tools/MajSimaiCpp/README.md MajSimai/LICENSE MajSimaiCpp/
+          find MajSimaiCpp -mindepth 1 -maxdepth 1 ! -name .git ! -name README.md -exec rm -rf {} +
+          cp MajSimai/tools/MajSimaiCpp/CMakeLists.txt MajSimai/LICENSE MajSimaiCpp/
           mkdir MajSimaiCpp/packages
           for package in packages/majsimai-cpp-*; do
             cp -R "$package" "MajSimaiCpp/packages/${package#packages/majsimai-cpp-}"
