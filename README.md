@@ -239,6 +239,16 @@ print how often each diagnostic occurs.
 Set `MAJSIMAI_BENCHMARK=1` as well and run `-class "*ParserBenchmarkTests"` in Release to compare the speed of both
 parsers.
 
+The C++ wrapper tests compile `Bindings/Cpp` with the compiler in `CXX` or the first of `c++`, `g++` and `clang++` on the
+path, and are skipped without one. To also run the wrapper against the native library and compare its results with the
+C# parser (Linux only; with `MAJSIMAI_SAMPLES_DIR` set, on the first 200 samples as well), publish the library and set
+`MAJSIMAI_NATIVE_LIBRARY`:
+
+```bash
+dotnet publish MajSimai.csproj -c Release -f net10.0 -r linux-x64 -p:PublishAot=true -o native
+MAJSIMAI_NATIVE_LIBRARY=native/MajSimai.so dotnet run --project Tests/MajSimai.Tests -- -class "*CppBindingNativeTests"
+```
+
 ## Build
 
 If you want to compile MajSimai yourself, please make sure that the .NET 10 SDK (or newer) is installed on your computer:
@@ -277,44 +287,99 @@ If you want to compile native library, you need to specify the use of AOT.
 dotnet publish -c release /p:PublishAot=true -f net9.0 -r linux-x64
 ```
 
-In the native library, MajSimai will export functions (the native note layout changed in 3.0: see
-`Runtime/Unmanaged/UnmanagedSimaiNote.cs`; related notes are indices into the notes of the same timing point):
+In the native library, MajSimai exports these functions (declared in `Runtime/Unmanaged/UnmanagedSimaiParser.cs`):
 
-- `MajSimai!MajSimai_Parse`
-- `MajSimai!MajSimai_Free`
-- `MajSimai!MajSimai_FreeHGlobal`
+- `MajSimai_Parse(const char* content, int32_t contentLength, UnmanagedSimaiParseResult* result)` parses a file in
+  lenient mode. The content is UTF-8 (a UTF-8 or UTF-16 byte order mark is honored).
+- `MajSimai_Free(UnmanagedSimaiParseResult* result)` frees a result, whether parsing succeeded or not.
+- `MajSimai_FreeHGlobal(intptr_t ptr)` frees memory allocated by MajSimai.
 
-You can use these exported functions in C++:
+The native layouts changed in 3.0: notes follow the 3.0 note model, related notes are indices into the notes of the
+same timing point, and every text is UTF-8 with its length in bytes (2.x used the ANSI code page with lengths in UTF-16
+characters). The native library logs through the default logger, so its warnings go to standard output.
+
+## C++ wrapper
+
+`Bindings/Cpp` is a header-only C++17 wrapper in the style of [MajSimaiCpp](https://github.com/TeamMajdata/MajSimaiCpp).
+It is generated from the native ABI by `tools/MajSimai.CppGen`, the way FFmpeg.AutoGen generates C# bindings from the
+FFmpeg headers, so it always matches the exported structs.
 
 ```C++
-struct MajSimaiParseResult
+#include <MajSimai/MajSimai.h>
+
+// Copy the result into owned data
+MajSimai::SimaiFile file = MajSimai::SimaiParser::Parse(text);
+for (const auto& note : file.charts[4].noteTimings[0].notes)
 {
-    int32_t code = -1;
-    int32_t errorAtLine = -1;
-    int32_t errorAtColumn = -1;
-    int32_t errorMsgLen = 0;
-    int32_t errorContentLen = 0;
+    bool star = note.isStar;
+}
 
-    void* simaiFile = NULL;
-    char* errorMsgAnsi = NULL;
-    char* errorContentAnsi = NULL;
-};
-
-extern "C" void __cdecl MajSimai_Parse(char*, int32_t, void*);
-extern "C" bool __cdecl MajSimai_Free(MajSimaiParseResult*);
-extern "C" bool __cdecl MajSimai_FreeHGlobal(void*);
-
-int main()
+// Or read the native memory without copying it; it is freed when `parsed` is destroyed
+MajSimai::ParsedSimaiFile parsed = MajSimai::SimaiParser::ParseAsView(text);
+for (auto chart : parsed.GetCharts())
 {
-    const string FUMEN = R"(&title=Test
-&artist=NULL
-&first=0
-&des=1
-&lv_5=114514
-&inote_5=
-(197){8}1,2,3,4,5,6,7,8,)";
-    MajSimaiParseResult result = MajSimaiParseResult();
-    MajSimai_Parse(FUMEN.data(), FUMEN.length(), &result);
-    MajSimai_Free(&result);
+    for (auto timing : chart.GetNoteTimings())
+    {
+        for (auto note : timing.GetNotes())
+        {
+            std::string_view raw = note.GetRawContent();
+        }
+    }
 }
 ```
+
+A failed parse throws `MajSimai::SimaiParseException`, with `GetCode()`, `GetLine()`, `GetColumn()` and `GetContent()`.
+
+| Header | Content |
+|---|---|
+| `MajSimai.h` | `SimaiParser`, `ParsedSimaiFile` (owns the native result) and `SimaiParseException` |
+| `MajSimai.Core.g.h` | The enums, the native structs and the exported functions, with `static_assert`s that every offset and size matches MajSimai on 64-bit platforms |
+| `MajSimai.Views.g.h` | A view per struct (`SimaiNoteView`, ...) that reads the native memory without copying it |
+| `MajSimai.Model.g.h` | An owned struct per native struct (`SimaiNote`, ...) with `std::string` and `std::vector` |
+| `MajSimai.ArrayView.g.h` | `ArrayView`, the iterable view of a native array |
+
+With CMake, add the wrapper and point it at the published library:
+
+```cmake
+set(MAJSIMAI_NATIVE_LIBRARY "path/to/MajSimai.so") # MajSimai.lib on Windows, MajSimai.dylib on macOS
+add_subdirectory(MajSimai/Bindings/Cpp)
+target_link_libraries(app PRIVATE MajSimai::MajSimaiCpp)
+```
+
+On Linux the program then finds `MajSimai.so` through its rpath or `LD_LIBRARY_PATH`. Without CMake, add
+`Bindings/Cpp/include` to the include path and link the library.
+
+### Regenerating the wrapper
+
+The generator reads the compiled ABI with reflection: it starts from the methods marked with
+`[UnmanagedCallersOnly(EntryPoint = ...)]` and follows their parameters and fields to the structs and enums they use.
+Run it after changing `Runtime/Unmanaged`; a test fails while `Bindings/Cpp` is out of date.
+
+```bash
+dotnet run --project tools/MajSimai.CppGen               # writes Bindings/Cpp
+dotnet run --project tools/MajSimai.CppGen -- --check    # exits with 1 when Bindings/Cpp is out of date
+```
+
+The ABI follows these rules, and the generator stops with a message that names the member when one is broken:
+
+- A pointer field says what it points to with an attribute. The field that holds the length is hidden in the views and
+  models.
+
+  | Attribute | Field | C++ view / model |
+  |---|---|---|
+  | `[NativeString(nameof(textLen))]` | `byte*`: UTF-8 text, length in bytes | `std::string_view` / `std::string` |
+  | `[NativeArray(nameof(itemsLen))]` | `T*`: an array | `ArrayView` / `std::vector` |
+  | `[NativePointee(typeof(T))]` | `void*`: one `T`, only in the parse result | `T*` |
+
+- A data struct is named `Unmanaged<Name>`; its view is `<Name>View` and its model `<Name>`. A struct that exported
+  functions take by pointer (the parse result) gets no view or model.
+- Structs use the default sequential layout. The generator measures every offset in .NET and checks that C++ gives the
+  same one.
+- Exported functions set `CallConvs`. `bool` and `char` in their signatures need `[assembly: DisableRuntimeMarshalling]`,
+  which `Runtime/Unmanaged/RuntimeMarshalling.cs` sets.
+- XML documentation comments become Doxygen comments.
+- `MajSimai.h` is written against fixed names (`MajSimai_Parse`, `MajSimai_Free` and the fields of
+  `UnmanagedSimaiParseResult`); the generator checks them before writing anything.
+
+The wrapper is tested with GCC 13 and Clang 18 on Linux x64 against the native AOT library. MSVC, macOS and 32-bit
+platforms are not tested, and 32-bit layouts are not checked by the `static_assert`s.

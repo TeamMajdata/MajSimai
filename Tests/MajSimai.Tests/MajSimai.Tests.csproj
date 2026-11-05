@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\MajSimai.csproj" />
+    <ProjectReference Include="..\..\tools\MajSimai.CppGen\MajSimai.CppGen.csproj" />
   </ItemGroup>
 
   <Target Name="CopyLegacyMajSimai" AfterTargets="Build">

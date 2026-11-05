@@ -23,13 +23,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Tests\**" />
-    <None Remove="Tests\**" />
-    <EmbeddedResource Remove="Tests\**" />
+    <Compile Remove="Tests\**;tools\**" />
+    <None Remove="Tests\**;tools\**" />
+    <EmbeddedResource Remove="Tests\**;tools\**" />
   </ItemGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="MajSimai.Tests" />
+    <InternalsVisibleTo Include="MajSimai.CppGen" />
   </ItemGroup>
 
 </Project>
