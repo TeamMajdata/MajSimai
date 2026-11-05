@@ -1,7 +1,7 @@
 """Publishes MajSimai as a native AOT shared or static library and packages it with the generated C++ wrapper.
 
 Usage:
-    python tools/build-cpp-package.py --kind shared|static [--rid <rid>] [--output <folder>] [--verify]
+    python tools/build-cpp-package.py --kind shared|static [--rid <rid>] [--output <folder>] [--version <version>] [--verify]
 
 The package is a CMake project that a C++17 program adds with add_subdirectory() and links as MajSimai::MajSimaiCpp:
 
@@ -101,6 +101,11 @@ def prepare_output(output):
     output.mkdir(parents=True)
 
 
+def version_properties(arguments):
+    """Gets the MSBuild property that overrides the version of MajSimai, or nothing to keep the one in MajSimai.csproj."""
+    return [f"-p:Version={arguments.version}"] if arguments.version else []
+
+
 def publish(arguments, runtime_identifier, temporary):
     """Publishes MajSimai with native AOT and returns the link items written by MajSimai.NativePackage.targets."""
     items_file = temporary / "link-items.txt"
@@ -113,6 +118,7 @@ def publish(arguments, runtime_identifier, temporary):
          f"-p:NativeLib={'Shared' if arguments.kind == 'shared' else 'Static'}",
          f"-p:CustomAfterMicrosoftCommonTargets={LINK_TARGETS}",
          f"-p:MajSimaiLinkItemsFile={items_file}",
+         *version_properties(arguments),
          "-o", publish_folder])
     if not items_file.exists():
         fail("the publish did not write the link items; is native AOT supported for this runtime identifier?")
@@ -177,7 +183,7 @@ def package_native(arguments, runtime_identifier, publish_folder, items, output)
 
 def generate(arguments, output):
     """Generates the C++ wrapper and the CMake file of the package."""
-    run([arguments.dotnet, "run", "--project", GENERATOR, "-c", arguments.configuration, "--",
+    run([arguments.dotnet, "run", "--project", GENERATOR, "-c", arguments.configuration, *version_properties(arguments), "--",
          "--output", output, "--native-manifest", output / MANIFEST])
 
 
@@ -191,6 +197,10 @@ def verify(arguments, output):
         (folder / "main.cpp").write_text(VERIFY_PROGRAM, encoding="utf-8")
         (folder / "CMakeLists.txt").write_text(f"""cmake_minimum_required(VERSION 3.15)
 project(MajSimaiVerify LANGUAGES CXX)
+if(MSVC AND "{arguments.kind}" STREQUAL "static")
+    # The native AOT runtime of a static library is compiled with the static release C runtime (/MT).
+    set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)
+endif()
 add_subdirectory("{output.as_posix()}" majsimai)
 add_executable(verify main.cpp)
 target_link_libraries(verify PRIVATE MajSimai::MajSimaiCpp)
@@ -217,6 +227,7 @@ def main():
     parser.add_argument("--framework", default="net10.0", help="the target framework to publish (default: net10.0)")
     parser.add_argument("--configuration", default="Release", help="the build configuration (default: Release)")
     parser.add_argument("--dotnet", default="dotnet", help="the dotnet command (default: dotnet)")
+    parser.add_argument("--version", help="the version of MajSimai to build, such as 3.0.1 (default: the one in MajSimai.csproj)")
     parser.add_argument("--verify", action="store_true", help="build and run a small CMake program that links the package")
     arguments = parser.parse_args()
 

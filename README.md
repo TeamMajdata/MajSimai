@@ -431,8 +431,16 @@ target_link_libraries(app PRIVATE MajSimai::MajSimaiCpp)
 
 The script reads the runtime libraries from the publish itself (`tools/MajSimai.NativePackage.targets`), so the package
 matches the .NET SDK that built it, and writes them to `MajSimaiNative.json`; the generator turns that file into the
-`CMakeLists.txt` (`--native-manifest`). Options: `--rid`, `--output`, `--framework`, `--configuration`. Native AOT
-needs a C++ toolchain and cannot cross-compile to another operating system.
+`CMakeLists.txt` (`--native-manifest`). Options: `--rid`, `--output`, `--framework`, `--configuration`, `--version`
+(overrides the version in `MajSimai.csproj`). Native AOT needs a C++ toolchain and cannot cross-compile to another
+operating system. A static package on Windows needs the static release C runtime:
+`set(CMAKE_MSVC_RUNTIME_LIBRARY MultiThreaded)`.
+
+When a version tag is pushed, the release workflow (`.github/workflows/main.yml`) builds a static package for
+`win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64` and `osx-arm64`, and pushes them to
+[MajSimaiCpp](https://github.com/TeamMajdata/MajSimaiCpp) under `packages/<rid>` with the root files in
+`tools/MajSimaiCpp`, tagged with the same version. It needs the secret `MAJSIMAICPP_TOKEN`, a token that can push to
+MajSimaiCpp.
 
 Without the script, add `Bindings/Cpp` and point it at a library you published yourself:
 
