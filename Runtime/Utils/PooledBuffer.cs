@@ -131,11 +131,12 @@ internal sealed class PooledBuffer<T> : IDisposable
     }
 
     /// <summary>
-    /// Removes every item but keeps the rented storage.
+    /// Removes every item but keeps the rented storage. Clearing an empty buffer costs nothing, so callers can clear
+    /// before and after use.
     /// </summary>
     public void Clear()
     {
-        if (RuntimeHelpers.IsReferenceOrContainsReferences<T>())
+        if (_count != 0 && RuntimeHelpers.IsReferenceOrContainsReferences<T>())
         {
             Array.Clear(_items, 0, _count);
         }

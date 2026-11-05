@@ -121,6 +121,12 @@ internal static class NoteReader
         {
             return;
         }
+        if (content.Length == 1 && IsButton(content[0]))
+        {
+            // A single tap such as "1" is about half of all timing points.
+            AddTap(content, output);
+            return;
+        }
         if (content.Length == 2 && IsDigit(content[0]) && IsDigit(content[1]))
         {
             // Two digits are two taps: "18" is "1/8".
@@ -164,10 +170,34 @@ internal static class NoteReader
     /// <param name="output">Receives the note.</param>
     private static void ReadNote(in NoteSource source, ReadOnlySpan<char> note, PooledBuffer<ParsedNote> output)
     {
+        if (note.Length == 1 && IsButton(note[0]))
+        {
+            AddTap(note, output);
+            return;
+        }
         if (ReadSingle(source, note, SameHeadRole.None, output) == ReadOutcome.Unreadable && source.IsReported(SyntaxRules.UnreadableNote))
         {
             source.Report(SyntaxRules.UnreadableNote, $"Cannot read the note \"{note.ToString()}\".", note);
         }
+    }
+
+    /// <summary>
+    /// Appends a tap written as a single button such as <c>1</c>: the note <see cref="ReadSingle"/> reads for it, valid
+    /// in every mode, without detecting markers. Taps like this are most of the notes of a chart.
+    /// </summary>
+    /// <param name="button">The note text, one character from <c>1</c> to <c>8</c>.</param>
+    /// <param name="output">Receives the note.</param>
+    private static void AddTap(ReadOnlySpan<char> button, PooledBuffer<ParsedNote> output)
+    {
+        output.Add(new ParsedNote
+        {
+            Type = SimaiNoteType.Tap,
+            StartPosition = button[0] - '0',
+            TouchArea = ' ',
+            Flags = ParsedNoteFlags.UsingSV,
+            RawContent = StringCache.Get(button),
+            Role = SameHeadRole.None,
+        });
     }
 
     /// <summary>
@@ -273,7 +303,7 @@ internal static class NoteReader
             note.TouchArea = text[0];
             if (note.TouchArea != 'C')
             {
-                if (text.Length < 2 || !DurationReader.TryParseInt(text.Slice(1, 1), out note.StartPosition))
+                if (text.Length < 2 || !TryParseDigit(text[1], out note.StartPosition))
                 {
                     return ReadOutcome.Unreadable;
                 }
@@ -286,7 +316,7 @@ internal static class NoteReader
         }
         else
         {
-            if (!DurationReader.TryParseInt(text.Slice(0, 1), out note.StartPosition))
+            if (!TryParseDigit(text[0], out note.StartPosition))
             {
                 return ReadOutcome.Unreadable;
             }
@@ -493,6 +523,26 @@ internal static class NoteReader
     private static bool IsButton(char c)
     {
         return c >= '1' && c <= '8';
+    }
+
+    /// <summary>
+    /// Reads a button or sensor number written as one character. It gives the same result as
+    /// <see cref="DurationReader.TryParseInt"/> on that one character, which only accepts <c>0</c> to <c>9</c>, without
+    /// the cost of a general number parse for every note.
+    /// </summary>
+    /// <param name="c">The character.</param>
+    /// <param name="value">Receives the digit, or 0.</param>
+    /// <returns><see langword="true"/> for <c>0</c> to <c>9</c>.</returns>
+    private static bool TryParseDigit(char c, out int value)
+    {
+        if (IsDigit(c))
+        {
+            value = c - '0';
+            return true;
+        }
+        value = 0;
+
+        return false;
     }
 
     /// <summary>

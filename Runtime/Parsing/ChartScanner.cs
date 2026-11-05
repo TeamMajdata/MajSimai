@@ -92,6 +92,12 @@ internal ref struct ChartScanner
     private double _time;
 
     /// <summary>
+    /// The time in seconds from one comma to the next, for the BPM and beats in effect. It is computed once per change
+    /// instead of at every comma, with the same expression, so the times are the same to the last bit.
+    /// </summary>
+    private double _commaInterval;
+
+    /// <summary>
     /// Whether note text has started since the last comma.
     /// </summary>
     private bool _hasNote;
@@ -148,6 +154,7 @@ internal ref struct ChartScanner
         _signatureNumerator = 4;
         _signatureDenominator = 4;
         _time = 0;
+        UpdateCommaInterval();
         _hasNote = false;
         _line = 1;
         _lineStart = 0;
@@ -162,6 +169,8 @@ internal ref struct ChartScanner
     public void Scan()
     {
         var fumen = _fumen;
+        // The readers of comments and declarations move the position through a copy of the loop index: passing the
+        // index itself by reference would keep it in memory instead of a register for every character of the chart.
         for (var i = 0; i < fumen.Length; i++)
         {
             var c = fumen[i];
@@ -171,32 +180,51 @@ internal ref struct ChartScanner
                     NewLine(i);
                     continue;
                 case '|':
-                    ReadComment(ref i);
+                {
+                    var end = i;
+                    ReadComment(ref end);
+                    i = end;
                     continue;
+                }
                 case '(':
-                    if (!ReadBpm(ref i))
+                {
+                    var end = i;
+                    var isClosed = ReadBpm(ref end);
+                    i = end;
+                    if (!isClosed)
                     {
                         // The declaration is not closed. Parsing threw; the syntax checker keeps what it read so far.
                         AddCommaTiming(i);
                         return;
                     }
                     continue;
+                }
                 case '{':
-                    if (!ReadBeats(ref i))
+                {
+                    var end = i;
+                    var isClosed = ReadBeats(ref end);
+                    i = end;
+                    if (!isClosed)
                     {
                         // The declaration is not closed. Parsing threw; the syntax checker keeps what it read so far.
                         AddCommaTiming(i);
                         return;
                     }
                     continue;
+                }
                 case '<' when !_hasNote:
-                    if (!ReadSpeed(ref i))
+                {
+                    var end = i;
+                    var isClosed = ReadSpeed(ref end);
+                    i = end;
+                    if (!isClosed)
                     {
                         // The declaration is not closed. Parsing threw; the syntax checker keeps what it read so far.
                         AddCommaTiming(i);
                         return;
                     }
                     continue;
+                }
                 case ',':
                     EndTimingPoint(i);
                     continue;
@@ -231,6 +259,14 @@ internal ref struct ChartScanner
     }
 
     /// <summary>
+    /// Computes <see cref="_commaInterval"/> for the BPM and beats in effect; called whenever one of them changes.
+    /// </summary>
+    private void UpdateCommaInterval()
+    {
+        _commaInterval = 1d / (_bpm / 60d) * 4d / _beats;
+    }
+
+    /// <summary>
     /// Gets the column of a character on the current line.
     /// </summary>
     /// <param name="index">The index of the character.</param>
@@ -261,7 +297,7 @@ internal ref struct ChartScanner
             AddNoteTimings(position);
         }
         AddCommaTiming(position);
-        _time += 1d / (_bpm / 60d) * 4d / _beats;
+        _time += _commaInterval;
         _hasNote = false;
         _noteText.Clear();
     }
@@ -522,6 +558,7 @@ internal ref struct ChartScanner
             return true;
         }
         _bpm = bpm;
+        UpdateCommaInterval();
 
         return true;
     }
@@ -554,10 +591,12 @@ internal ref struct ChartScanner
                 return true;
             }
             _beats = 240f / (_bpm * interval);
+            UpdateCommaInterval();
         }
         else if (DurationReader.TryParseFloat(value, out var beats))
         {
             _beats = beats;
+            UpdateCommaInterval();
         }
         else
         {

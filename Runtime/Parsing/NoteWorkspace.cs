@@ -23,12 +23,12 @@ internal sealed class NoteWorkspace
     /// <summary>
     /// Gets the buffer for the notes being built for one timing point.
     /// </summary>
-    public PooledBuffer<SimaiNote> Notes { get; } = new();
+    public SimaiNoteBuffer Notes { get; } = new();
 
     /// <summary>
     /// Gets the buffer for the slides of the star head being built.
     /// </summary>
-    public PooledBuffer<SimaiNote> RelatedSlides { get; } = new();
+    public SimaiNoteBuffer RelatedSlides { get; } = new();
 
     /// <summary>
     /// Takes the workspace of the current thread, or creates one when it is in use or does not exist yet.

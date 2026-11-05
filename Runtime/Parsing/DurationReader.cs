@@ -326,12 +326,50 @@ internal static class DurationReader
     /// <summary>
     /// Parses an integer: an optional sign and digits, with the invariant culture.
     /// </summary>
+    /// <remarks>
+    /// Durations such as <c>[8:1]</c> are plain digits almost always, so up to nine of them are added up directly; that
+    /// gives the value <see cref="int.TryParse(ReadOnlySpan{char}, NumberStyles, IFormatProvider, out int)"/> would
+    /// give and cannot overflow. Any other text is left to it.
+    /// </remarks>
     /// <param name="text">The text.</param>
     /// <param name="value">Receives the value.</param>
     /// <returns><see langword="true"/> when the text is an integer.</returns>
     public static bool TryParseInt(ReadOnlySpan<char> text, out int value)
     {
+        if (TryParseDigits(text, out value))
+        {
+            return true;
+        }
+
         return int.TryParse(text, NumberStyles.Integer, s_culture, out value);
+    }
+
+    /// <summary>
+    /// Reads one to nine ASCII digits.
+    /// </summary>
+    /// <param name="text">The text.</param>
+    /// <param name="value">Receives the value, or 0 when the text is not one to nine digits.</param>
+    /// <returns><see langword="true"/> when the text is one to nine digits.</returns>
+    private static bool TryParseDigits(ReadOnlySpan<char> text, out int value)
+    {
+        value = 0;
+        if (text.IsEmpty || text.Length > 9)
+        {
+            return false;
+        }
+        var result = 0;
+        foreach (var c in text)
+        {
+            var digit = c - '0';
+            if ((uint)digit > 9)
+            {
+                return false;
+            }
+            result = result * 10 + digit;
+        }
+        value = result;
+
+        return true;
     }
 
     /// <summary>

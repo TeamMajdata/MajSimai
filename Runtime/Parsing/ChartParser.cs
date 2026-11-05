@@ -12,14 +12,16 @@ namespace MajSimai.Parsing;
 internal static class ChartParser
 {
     /// <summary>
-    /// The number of note timing points above which the notes are read in parallel.
+    /// The number of note timing points above which the notes are read in parallel. A typical chart has a few hundred
+    /// to a thousand timing points and reads them in well under a millisecond, which waking other threads would not
+    /// shorten; only much longer charts gain from it.
     /// </summary>
-    internal const int ParallelThreshold = 256;
+    internal const int ParallelThreshold = 4096;
 
     /// <summary>
     /// The number of note timing points one parallel work item reads.
     /// </summary>
-    internal const int ChunkSize = 128;
+    internal const int ChunkSize = 1024;
 
     /// <summary>
     /// Parses a chart.
@@ -54,9 +56,13 @@ internal static class ChartParser
         {
             return SimaiChart.Create(level, designer, string.Empty, Array.Empty<SimaiTimingPoint>(), Array.Empty<CommaTiming>());
         }
+        // Every comma and the end of the text make a comma timing point, and a note timing point ends at a comma (more
+        // only with fake each), so sizing both buffers from the commas keeps them from growing and copying what they
+        // hold; comma-heavy charts have hundreds of thousands of them.
+        var timingCapacity = CountCommas(fumen) + 1;
         using var contentArena = new PooledBuffer<char>(fumen.Length);
-        using var rawTimings = new PooledBuffer<RawNoteTiming>(256);
-        using var commaTimings = new PooledBuffer<CommaTiming>(256);
+        using var rawTimings = new PooledBuffer<RawNoteTiming>(timingCapacity);
+        using var commaTimings = new PooledBuffer<CommaTiming>(timingCapacity);
         using var noteText = new PooledBuffer<char>(64);
         using var declaration = new PooledBuffer<char>(16);
 
@@ -66,6 +72,30 @@ internal static class ChartParser
         var noteTimings = ReadNotes(rawTimings, contentArena, reporter, allowParallel && !reporter.IsCollecting);
 
         return SimaiChart.Create(level, designer, fumenString ?? fumen.ToString(), noteTimings, commaTimings.ToArray());
+    }
+
+    /// <summary>
+    /// Counts the commas of a chart text, an upper bound of its comma timing points: commas in comments and after the
+    /// end marker make none.
+    /// </summary>
+    /// <param name="fumen">The chart text.</param>
+    /// <returns>The number of commas.</returns>
+    private static int CountCommas(ReadOnlySpan<char> fumen)
+    {
+#if NET8_0_OR_GREATER
+        return fumen.Count(',');
+#else
+        var count = 0;
+        foreach (var c in fumen)
+        {
+            if (c == ',')
+            {
+                count++;
+            }
+        }
+
+        return count;
+#endif
     }
 
     /// <summary>
@@ -146,11 +176,16 @@ internal static class ChartParser
                 var source = new NoteSource(raw.Timing, raw.Bpm, content, raw.NoteLine, raw.NoteColumn, reporter);
                 workspace.ParsedNotes.Clear();
                 NoteReader.ReadTimingPoint(source, workspace.ParsedNotes);
-                var notes = NoteAssembler.Assemble(workspace.ParsedNotes.AsSpan(), workspace);
+                var parsedNotes = workspace.ParsedNotes.AsSpan();
+                var notes = NoteAssembler.Assemble(parsedNotes, workspace);
+                // The text of a timing point with one note is often the text of that note; reuse its string.
+                var rawContent = parsedNotes.Length == 1 && content.SequenceEqual(parsedNotes[0].RawContent.AsSpan())
+                    ? parsedNotes[0].RawContent
+                    : StringCache.Get(content);
                 workspace.ParsedNotes.Clear();
                 result[i] = SimaiTimingPoint.Create(raw.Timing,
                                                     notes,
-                                                    StringCache.Get(content),
+                                                    rawContent,
                                                     raw.TextPositionX,
                                                     raw.TextPositionY,
                                                     raw.Bpm,

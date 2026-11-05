@@ -42,6 +42,10 @@ internal static class NoteAssembler
         {
             return Array.Empty<SimaiNote>();
         }
+        if (parsedNotes.Length == 1 && parsedNotes[0].Type != SimaiNoteType.Slide)
+        {
+            return new[] { CreateOnlyNote(in parsedNotes[0]) };
+        }
         var notes = workspace.Notes;
         var relatedSlides = workspace.RelatedSlides;
         notes.Clear();
@@ -89,9 +93,26 @@ internal static class NoteAssembler
     }
 
     /// <summary>
+    /// Creates the only note of a timing point when it is not a slide, as <see cref="ApplyGroupFlags"/> would leave it:
+    /// it is not each, and a tap without slides is a star only when <c>$</c> forces it.
+    /// </summary>
+    /// <param name="parsed">The note read from the text.</param>
+    /// <returns>The note.</returns>
+    private static SimaiNote CreateOnlyNote(in ParsedNote parsed)
+    {
+        var note = CreateNote(in parsed);
+        if (note.Type == SimaiNoteType.Tap)
+        {
+            note.IsStar = note.IsForceStar;
+        }
+
+        return note;
+    }
+
+    /// <summary>
     /// Gives the open star head the slides collected for it.
     /// </summary>
-    private static void CloseHead(ref SimaiNote? head, PooledBuffer<SimaiNote> relatedSlides)
+    private static void CloseHead(ref SimaiNote? head, SimaiNoteBuffer relatedSlides)
     {
         if (head is null)
         {
@@ -207,19 +228,44 @@ internal static class NoteAssembler
     }
 
     /// <summary>
-    /// Copies the markers that apply to a note that is not a slide path.
+    /// Copies the markers that apply to a note that is not a slide path. The note has just been created, so its flags
+    /// are all clear and only the markers that are present are set; most notes have none but <c>UsingSV</c>.
     /// </summary>
-    /// <param name="note">The note to change.</param>
+    /// <param name="note">The new note.</param>
     /// <param name="flags">The markers.</param>
     private static void ApplyFlags(SimaiNote note, ParsedNoteFlags flags)
     {
-        note.IsBreak = (flags & ParsedNoteFlags.Break) != 0;
-        note.IsEx = (flags & ParsedNoteFlags.Ex) != 0;
-        note.IsMine = (flags & ParsedNoteFlags.Mine) != 0;
-        note.IsForceStar = (flags & ParsedNoteFlags.ForceStar) != 0;
-        note.IsFakeRotate = (flags & ParsedNoteFlags.FakeRotate) != 0;
-        note.IsTapHeadSlide = (flags & ParsedNoteFlags.TapHeadSlide) != 0;
-        note.IsHanabi = (flags & ParsedNoteFlags.Hanabi) != 0;
-        note.UsingSV = (flags & ParsedNoteFlags.UsingSV) != 0;
+        if ((flags & ParsedNoteFlags.Break) != 0)
+        {
+            note.IsBreak = true;
+        }
+        if ((flags & ParsedNoteFlags.Ex) != 0)
+        {
+            note.IsEx = true;
+        }
+        if ((flags & ParsedNoteFlags.Mine) != 0)
+        {
+            note.IsMine = true;
+        }
+        if ((flags & ParsedNoteFlags.ForceStar) != 0)
+        {
+            note.IsForceStar = true;
+        }
+        if ((flags & ParsedNoteFlags.FakeRotate) != 0)
+        {
+            note.IsFakeRotate = true;
+        }
+        if ((flags & ParsedNoteFlags.TapHeadSlide) != 0)
+        {
+            note.IsTapHeadSlide = true;
+        }
+        if ((flags & ParsedNoteFlags.Hanabi) != 0)
+        {
+            note.IsHanabi = true;
+        }
+        if ((flags & ParsedNoteFlags.UsingSV) != 0)
+        {
+            note.UsingSV = true;
+        }
     }
 }
