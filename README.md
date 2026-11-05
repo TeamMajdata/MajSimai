@@ -440,7 +440,9 @@ When a version tag is pushed, the release workflow (`.github/workflows/main.yml`
 `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64` and `osx-arm64`, and pushes them to
 [MajSimaiCpp](https://github.com/TeamMajdata/MajSimaiCpp) under `packages/<rid>` with the root files in
 `tools/MajSimaiCpp`, tagged with the same version. It needs the secret `MAJSIMAICPP_TOKEN`, a token that can push to
-MajSimaiCpp.
+MajSimaiCpp. To test it, run the workflow by hand (Actions → Run workflow, with an optional version such as
+`3.0.1-test`): it builds everything, uploads the NuGet packages, the C++ packages and the content of MajSimaiCpp as
+artifacts, and publishes nothing; the push to MajSimaiCpp is a dry run that still checks the token.
 
 Without the script, add `Bindings/Cpp` and point it at a library you published yourself:
 
