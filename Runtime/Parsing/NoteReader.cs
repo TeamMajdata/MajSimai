@@ -77,15 +77,15 @@ internal readonly ref struct NoteSource
 /// parts start from the button of the first part. Two digits such as <c>18</c> are two taps.
 /// </para>
 /// <para>
-/// These are always errors (<see cref="SyntaxRuleKind.Invalid"/>): a note with nothing left after removing its
-/// markers, an empty <c>*</c> part, a touch area letter that is not at the start of a note, a duration with too many
-/// separators or with text between the two <c>#</c> of <c>[wait##length]</c>, and a hold whose <c>]</c> comes before
-/// its <c>[</c>.
+/// In lenient mode these notes are skipped and logged as warnings: a note with nothing left after removing its markers,
+/// a touch area letter that is not at the start of a note, a duration with too many separators or with text between the
+/// two <c>#</c> of <c>[wait##length]</c>, and a hold whose <c>]</c> comes before its <c>[</c>. Empty <c>*</c> parts are
+/// skipped too. A note that cannot be read is skipped as well, as are empty <c>/</c> parts, an unreadable hold duration
+/// becomes 0, and a <c>b</c> or <c>m</c> in the middle of a slide path is ignored; these are logged at the debug level.
 /// </para>
 /// <para>
-/// In lenient mode a note that cannot be read is skipped, as are empty <c>/</c> parts, an unreadable hold duration
-/// becomes 0, and a <c>b</c> or <c>m</c> in the middle of a slide path is ignored. Strict mode throws for all of these,
-/// and also checks the shape of taps, holds and touches and the path of slides (see <see cref="SlidePathChecker"/>).
+/// Strict mode throws for all of these, and also checks the shape of taps, holds and touches and the path of slides
+/// (see <see cref="SlidePathChecker"/>).
 /// </para>
 /// </remarks>
 internal static class NoteReader
@@ -174,29 +174,21 @@ internal static class NoteReader
     /// Reads a same head group such as <c>1-3[8:1]*-5[8:1]</c>. Every later part is read with the first character of
     /// the first part in front of it.
     /// </summary>
+    /// <remarks>
+    /// An empty later part, such as the trailing <c>*</c> of <c>1-3[8:1]*</c>, is skipped; an empty first part leaves no
+    /// head button, so the whole group is skipped. Strict mode throws for both.
+    /// </remarks>
     /// <param name="source">The timing point.</param>
     /// <param name="group">The text of the group.</param>
     /// <param name="output">Receives the notes.</param>
-    /// <exception cref="InvalidSimaiNoteException">Thrown when a part is empty or breaks the grammar.</exception>
+    /// <exception cref="InvalidSimaiNoteException">Thrown in strict mode when a part is empty or breaks the grammar.</exception>
     private static void ReadSameHeadGroup(in NoteSource source, ReadOnlySpan<char> group, PooledBuffer<ParsedNote> output)
     {
-        var rest = group;
-        while (true)
+        if (group[0] == '*')
         {
-            var separator = rest.IndexOf('*');
-            var part = separator == -1 ? rest : rest.Slice(0, separator);
-            if (part.IsEmpty)
-            {
-                source.Report(SyntaxRules.EmptySameHeadPart, $"The same head group \"{group.ToString()}\" has an empty part.", group);
-                return;
-            }
-            if (separator == -1)
-            {
-                break;
-            }
-            rest = rest.Slice(separator + 1);
+            source.Report(SyntaxRules.EmptySameHeadPart, $"The same head group \"{group.ToString()}\" has an empty first part, so it has no head button.", group);
+            return;
         }
-
         var firstLength = group.IndexOf('*');
         var first = group.Slice(0, firstLength);
         var firstOutcome = ReadSingle(source, first, SameHeadRole.First, output);
@@ -213,11 +205,21 @@ internal static class NoteReader
         var heapText = bufferLength > StackTextLimit ? new char[bufferLength] : null;
         var buffer = heapText is null ? stackalloc char[bufferLength] : heapText.AsSpan();
         buffer[0] = first[0];
-        rest = group.Slice(firstLength + 1);
+        var rest = group.Slice(firstLength + 1);
         while (true)
         {
             var separator = rest.IndexOf('*');
             var part = separator == -1 ? rest : rest.Slice(0, separator);
+            if (part.IsEmpty)
+            {
+                source.Report(SyntaxRules.EmptySameHeadPart, $"The same head group \"{group.ToString()}\" has an empty part.", group);
+                if (separator == -1)
+                {
+                    return;
+                }
+                rest = rest.Slice(separator + 1);
+                continue;
+            }
             part.CopyTo(buffer.Slice(1));
             var text = buffer.Slice(0, part.Length + 1);
             if (ReadSingle(source, text, SameHeadRole.Continuation, output) == ReadOutcome.Unreadable && source.IsReported(SyntaxRules.UnreadableNote))

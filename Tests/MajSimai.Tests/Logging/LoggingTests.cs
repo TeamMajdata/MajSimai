@@ -123,6 +123,27 @@ public sealed class LoggingTests
     }
 
     /// <summary>
+    /// Skipped notes: are logged as warnings with their codes.
+    /// </summary>
+    [Fact]
+    public void SkippedNotes_AreLoggedAsWarningsWithTheirCodes()
+    {
+        var logger = new CapturingLogger(SimaiLogLevel.Warning);
+        Use(logger, () =>
+        {
+            var chart = SimaiParser.ParseChart("(120)1/b,12E,3-5[8:1]*,1h[8:1:2],");
+
+            Assert.Equal(4, chart.NoteTimings.Length);
+            var messages = logger.Entries.Select(e => e.Message).ToArray();
+            Assert.Contains(messages, m => m.Contains("has no button or sensor") && m.Contains("SM201"));
+            Assert.Contains(messages, m => m.Contains("touch area letter") && m.Contains("SM202"));
+            Assert.Contains(messages, m => m.Contains("has an empty part") && m.Contains("SM203"));
+            Assert.Contains(messages, m => m.Contains("too many ':' or '#'") && m.Contains("SM204"));
+            Assert.All(logger.Entries, e => Assert.Equal(SimaiLogLevel.Warning, e.Level));
+        });
+    }
+
+    /// <summary>
     /// Console logger: defaults to warning.
     /// </summary>
     [Fact]

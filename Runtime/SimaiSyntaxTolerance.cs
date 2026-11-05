@@ -6,9 +6,10 @@ namespace MajSimai;
 public enum SimaiSyntaxTolerance
 {
     /// <summary>
-    /// Reads charts the way MajSimai always has: a note that cannot be read is skipped, and text whose meaning the
-    /// grammar does not define (such as note text cut off by <c>(120)</c>, or a last note without a comma) is dropped and
-    /// logged. Malformed text that cannot be read in any sensible way still throws.
+    /// Reads charts the way MajSimai always has: a note that cannot be read or is malformed is skipped, and text whose
+    /// meaning the grammar does not define (such as note text cut off by <c>(120)</c>, or a last note without a comma) is
+    /// dropped; both are logged. Only declarations that are not closed or whose value cannot be read, and a single
+    /// <c>|</c>, still throw.
     /// </summary>
     Lenient,
     /// <summary>

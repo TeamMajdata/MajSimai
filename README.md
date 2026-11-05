@@ -135,7 +135,8 @@ var strictFile = SimaiParser.Parse(stream, SimaiParserOptions.Strict);
 
 | | Lenient | Strict |
 | --- | --- | --- |
-| Malformed text (see below) | throws | throws |
+| A declaration that is not closed, or whose value cannot be read; a single `\|` | throws | throws |
+| A malformed note (see below) | skipped (Warning log) | throws |
 | A note that cannot be read, such as `1-5` without a duration | skipped (Debug log) | throws |
 | Note text cut off by a declaration, `1(120)2,` | `1` dropped (Warning log) | throws |
 | Note text without a comma at the end of a chart | dropped (Warning log) | throws |
@@ -146,14 +147,16 @@ var strictFile = SimaiParser.Parse(stream, SimaiParserOptions.Strict);
 | `&` line without `=` / unreadable `&first` | ignored (Warning log) | throws |
 | A chart that fails in a file | kept with its text and no timing points (Error log) | the whole parse throws |
 
-Malformed text throws in both modes:
+Exceptions:
 
-- `InvalidSimaiSyntaxException`: an unclosed `(`, `{` or `<` declaration, or a BPM, beat or HS / SV value that cannot
-  be read.
-- `InvalidSimaiNoteException`: a note with nothing left after its markers (`1/b`), a touch area letter that is not at
-  the start of a note (`12E`, `1-5E[8:1]`), an empty `*` part (`1-5[8:1]*`), a duration with too many separators
-  (`[8:1:2]`, `[1#2#3#4#5]`) or with text between `#` (`[3#9#1.5]`), and a hold whose `]` comes before its `[`.
-- `InvalidSimaiMarkupException`: a single `|`.
+- `InvalidSimaiSyntaxException` (both modes): an unclosed `(`, `{` or `<` declaration, or a BPM, beat or HS / SV value
+  that cannot be read.
+- `InvalidSimaiMarkupException` (both modes): a single `|`.
+- `InvalidSimaiNoteException` (strict mode only): a malformed note, that is a note with nothing left after its markers
+  (`1/b`), a touch area letter that is not at the start of a note (`12E`, `1-5E[8:1]`), an empty `*` part
+  (`1-5[8:1]*`; the other parts of the group are kept), a duration with too many separators (`[8:1:2]`,
+  `[1#2#3#4#5]`) or with text between `#` (`[3#9#1.5]`), or a hold whose `]` comes before its `[`. Lenient mode skips
+  these notes and logs a `Warning`. Strict mode also throws it for every other note rule in the table above.
 
 The position of an exception is the line and column of the declaration, or of the start of the timing point that holds
 the note. Numbers are read with the invariant culture; exponents, `NaN` and `Infinity` are accepted, thousands
@@ -198,8 +201,9 @@ Apart from the note model, lenient mode reads charts as MajSimai 2.2.3 did, exce
 - A fake each keeps all its parts (2.x lost parts after the eighth).
 - Field names and values are trimmed: `&title = Song` is the title `Song`.
 - Parsing no longer changes `CultureInfo.DefaultThreadCurrentCulture`.
-- The malformed text listed above throws instead of being read as a different note or silently dropping the rest of
-  its timing point.
+- A declaration that is not closed throws instead of reading to the end of the text.
+- The malformed notes listed above are skipped with a warning, instead of being read as a different note (`12E` as a
+  touch on area `1`), adding a tap (`1-5[8:1]*`), or silently dropping the rest of their timing point (`1/b/2`).
 
 ## Logging
 

@@ -10,7 +10,8 @@ internal enum SyntaxRuleKind
 {
     /// <summary>The text cannot be read at all: parsing throws in every mode.</summary>
     Invalid,
-    /// <summary>The grammar does not define the text: strict mode throws, lenient mode reads it the MajSimai way.</summary>
+    /// <summary>The text breaks the grammar or the grammar does not define it: strict mode throws, lenient mode skips
+    /// it or reads it the MajSimai way and logs it.</summary>
     Undefined,
     /// <summary>The text is valid but questionable: parsing never throws, only the syntax checker reports it.</summary>
     Advice
@@ -107,16 +108,16 @@ internal static class SyntaxRules
     public static readonly SyntaxRule EmptyFakeEachPart = new(SimaiDiagnosticCodes.EmptyFakeEachPart, SyntaxRuleKind.Undefined, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note);
 
     /// <summary>See <see cref="SimaiDiagnosticCodes.EmptyNote"/>.</summary>
-    public static readonly SyntaxRule EmptyNote = new(SimaiDiagnosticCodes.EmptyNote, SyntaxRuleKind.Invalid, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note);
+    public static readonly SyntaxRule EmptyNote = new(SimaiDiagnosticCodes.EmptyNote, SyntaxRuleKind.Undefined, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note, SimaiLogLevel.Warning);
 
     /// <summary>See <see cref="SimaiDiagnosticCodes.MisplacedTouchArea"/>.</summary>
-    public static readonly SyntaxRule MisplacedTouchArea = new(SimaiDiagnosticCodes.MisplacedTouchArea, SyntaxRuleKind.Invalid, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note);
+    public static readonly SyntaxRule MisplacedTouchArea = new(SimaiDiagnosticCodes.MisplacedTouchArea, SyntaxRuleKind.Undefined, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note, SimaiLogLevel.Warning);
 
     /// <summary>See <see cref="SimaiDiagnosticCodes.EmptySameHeadPart"/>.</summary>
-    public static readonly SyntaxRule EmptySameHeadPart = new(SimaiDiagnosticCodes.EmptySameHeadPart, SyntaxRuleKind.Invalid, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note);
+    public static readonly SyntaxRule EmptySameHeadPart = new(SimaiDiagnosticCodes.EmptySameHeadPart, SyntaxRuleKind.Undefined, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note, SimaiLogLevel.Warning);
 
     /// <summary>See <see cref="SimaiDiagnosticCodes.MalformedDuration"/>.</summary>
-    public static readonly SyntaxRule MalformedDuration = new(SimaiDiagnosticCodes.MalformedDuration, SyntaxRuleKind.Invalid, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note);
+    public static readonly SyntaxRule MalformedDuration = new(SimaiDiagnosticCodes.MalformedDuration, SyntaxRuleKind.Undefined, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note, SimaiLogLevel.Warning);
 
     /// <summary>See <see cref="SimaiDiagnosticCodes.UnreadableNote"/>.</summary>
     public static readonly SyntaxRule UnreadableNote = new(SimaiDiagnosticCodes.UnreadableNote, SyntaxRuleKind.Undefined, SimaiDiagnosticSeverity.Error, SyntaxExceptionKind.Note);

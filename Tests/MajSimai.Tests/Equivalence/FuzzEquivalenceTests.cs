@@ -38,9 +38,9 @@ public sealed class FuzzEquivalenceTests
 
         TestContext.Current.TestOutputHelper?.WriteLine(
             $"Compared notes: {checker.ComparedNotes}, charts that threw in both: {checker.FailedCharts}, " +
-            $"rejected only by 3.x: {checker.IntentionalFailures.Values.Sum()}, " +
+            $"cut for 2.x: {checker.EndMarkerCharts}, " +
             $"normalized: {checker.Normalizer.HeadlessSlideHeadFlags} + {checker.Normalizer.NonSlideNoHeadFlags}; " +
-            string.Join(", ", checker.IntentionalFailures.Select(f => $"{f.Key}: {f.Value}")));
+            string.Join(", ", checker.IntendedDifferences.Select(f => $"{f.Key}: {f.Value}")));
         Assert.True(differences.Count == 0, string.Join("\n\n", differences.Take(5)));
     }
 

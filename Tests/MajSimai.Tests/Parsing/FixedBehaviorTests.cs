@@ -94,27 +94,6 @@ public sealed class FixedBehaviorTests
     }
 
     /// <summary>
-    /// Parse: does not change the default culture of the process.
-    /// </summary>
-    [Fact]
-    public void Parse_DoesNotChangeTheDefaultCulture()
-    {
-        var previous = CultureInfo.DefaultThreadCurrentCulture;
-        try
-        {
-            CultureInfo.DefaultThreadCurrentCulture = null;
-            SimaiParser.Parse("&inote_1=(120)1,".AsSpan(), string.Empty);
-            SimaiParser.Deparse(SimaiFile.Empty("t", "a"));
-
-            Assert.Null(CultureInfo.DefaultThreadCurrentCulture);
-        }
-        finally
-        {
-            CultureInfo.DefaultThreadCurrentCulture = previous;
-        }
-    }
-
-    /// <summary>
     /// Thousands separators: are not numbers.
     /// </summary>
     [Fact]
@@ -193,5 +172,35 @@ public sealed class FixedBehaviorTests
         Assert.Equal("4P2K3[8:1]", notes[2].RawContent);
         Assert.Equal(new[] { notes[1], notes[2] }, notes[0].RelatedNotes);
         Assert.True(notes[0].IsStarDouble);
+    }
+}
+
+/// <summary>
+/// Tests that parsing leaves the process-wide culture alone. The MajSimai 2.2.3 oracle used by other tests changes it, so
+/// these tests do not run in parallel with them.
+/// </summary>
+[Collection(nameof(CultureTests))]
+[CollectionDefinition(nameof(CultureTests), DisableParallelization = true)]
+public sealed class CultureTests
+{
+    /// <summary>
+    /// Parse: does not change the default culture of the process.
+    /// </summary>
+    [Fact]
+    public void Parse_DoesNotChangeTheDefaultCulture()
+    {
+        var previous = CultureInfo.DefaultThreadCurrentCulture;
+        try
+        {
+            CultureInfo.DefaultThreadCurrentCulture = null;
+            SimaiParser.Parse("&inote_1=(120)1,".AsSpan(), string.Empty);
+            SimaiParser.Deparse(SimaiFile.Empty("t", "a"));
+
+            Assert.Null(CultureInfo.DefaultThreadCurrentCulture);
+        }
+        finally
+        {
+            CultureInfo.DefaultThreadCurrentCulture = previous;
+        }
     }
 }

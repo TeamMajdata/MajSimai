@@ -11,7 +11,8 @@ namespace MajSimai.Parsing;
 /// <list type="bullet">
 /// <item>Lines and columns start from 1; the column of a timing point is the column of its comma.</item>
 /// <item><c>||</c> starts a comment that runs to the end of its line. <c>||s3/4</c> also sets the time signature.</item>
-/// <item><c>(bpm)</c>, <c>{beats}</c> and <c>&lt;HS*x&gt;</c> / <c>&lt;SV*x&gt;</c> declarations must be closed.</item>
+/// <item><c>(bpm)</c>, <c>{beats}</c> and <c>&lt;HS*x&gt;</c> / <c>&lt;SV*x&gt;</c> declarations must be closed; a declaration
+/// that is not closed throws in every mode.</item>
 /// <item>An <c>E</c> at the start of note text ends the chart unless the next character that is not whitespace is a
 /// digit: whitespace and line breaks are skipped as everywhere in simai, so <c>E\n3</c> is the sensor <c>E3</c>.</item>
 /// <item>In lenient mode, note text cut off by <c>(</c> or <c>{</c>, note text without a comma at the end, and stray
@@ -175,18 +176,24 @@ internal ref struct ChartScanner
                 case '(':
                     if (!ReadBpm(ref i))
                     {
+                        // The declaration is not closed. Parsing threw; the syntax checker keeps what it read so far.
+                        AddCommaTiming(i);
                         return;
                     }
                     continue;
                 case '{':
                     if (!ReadBeats(ref i))
                     {
+                        // The declaration is not closed. Parsing threw; the syntax checker keeps what it read so far.
+                        AddCommaTiming(i);
                         return;
                     }
                     continue;
                 case '<' when !_hasNote:
                     if (!ReadSpeed(ref i))
                     {
+                        // The declaration is not closed. Parsing threw; the syntax checker keeps what it read so far.
+                        AddCommaTiming(i);
                         return;
                     }
                     continue;

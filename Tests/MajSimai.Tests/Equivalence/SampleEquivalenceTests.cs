@@ -54,9 +54,9 @@ public sealed class SampleEquivalenceTests
         output?.WriteLine($"Charts that failed in both parsers: {checker.FailedCharts}");
         output?.WriteLine($"Normalized headless slide head flags: {checker.Normalizer.HeadlessSlideHeadFlags}");
         output?.WriteLine($"Normalized IsSlideNoHead on non-slides: {checker.Normalizer.NonSlideNoHeadFlags}");
-        output?.WriteLine($"Charts cut at the end marker E or with a final || for 2.x: {checker.EndMarkerCharts}");
+        output?.WriteLine($"Charts cut at the end marker E, or with a final ||, for 2.x: {checker.EndMarkerCharts}");
         output?.WriteLine($"Timing points with Slide Code not compared note by note: {checker.SlideCodeTimings}");
-        foreach (var failure in checker.IntentionalFailures.OrderByDescending(f => f.Value))
+        foreach (var failure in checker.IntendedDifferences.OrderByDescending(f => f.Value))
         {
             output?.WriteLine($"Intended differences ({failure.Key}): {failure.Value}");
         }

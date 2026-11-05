@@ -51,13 +51,19 @@ internal sealed class SyntaxReporter
     /// <param name="diagnostics">Receives the diagnostics.</param>
     /// <param name="chartIndex">The chart (1 to 7) diagnostics belong to, or <see langword="null"/>.</param>
     /// <param name="lineOffset">Added to the line of every diagnostic.</param>
+    /// <param name="tolerance">The rules the text is read with: <see cref="SimaiSyntaxTolerance.Strict"/> (the default)
+    /// also runs the strict checks, <see cref="SimaiSyntaxTolerance.Lenient"/> reads the text as the lenient parser does
+    /// and only collects what it skips or tolerates.</param>
     /// <exception cref="ArgumentNullException">Thrown when <paramref name="diagnostics"/> is <see langword="null"/>.</exception>
-    public SyntaxReporter(List<SimaiDiagnostic> diagnostics, int? chartIndex, int lineOffset)
+    public SyntaxReporter(List<SimaiDiagnostic> diagnostics,
+                          int? chartIndex,
+                          int lineOffset,
+                          SimaiSyntaxTolerance tolerance = SimaiSyntaxTolerance.Strict)
     {
         _diagnostics = diagnostics ?? throw new ArgumentNullException(nameof(diagnostics));
         _chartIndex = chartIndex;
         _lineOffset = lineOffset;
-        Tolerance = SimaiSyntaxTolerance.Strict;
+        Tolerance = tolerance;
     }
 
     /// <summary>
@@ -71,7 +77,8 @@ internal sealed class SyntaxReporter
     public static SyntaxReporter Strict { get; } = new(SimaiSyntaxTolerance.Strict);
 
     /// <summary>
-    /// Gets how strictly the grammar is followed. A collecting reporter runs every strict check.
+    /// Gets how strictly the grammar is followed. A collecting reporter runs every strict check unless it was created
+    /// with <see cref="SimaiSyntaxTolerance.Lenient"/>.
     /// </summary>
     public SimaiSyntaxTolerance Tolerance { get; }
 

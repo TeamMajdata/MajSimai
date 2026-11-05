@@ -6,7 +6,10 @@ using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
+using MajSimai.Diagnostics;
+using MajSimai.Parsing;
 using MajSimai.Tests.Legacy;
+using MajSimai.Utils;
 
 namespace MajSimai.Tests.Equivalence;
 
@@ -27,9 +30,11 @@ namespace MajSimai.Tests.Equivalence;
 /// note, because 2.x did not know Slide Code letters.
 /// </para>
 /// <para>
-/// When only the current parser throws an <see cref="InvalidSimaiNoteException"/> or reports an unclosed declaration,
-/// the chart breaks a rule 3.x added on purpose; it is counted in <see cref="IntentionalFailures"/>. Any other failure
-/// in only one parser, or failures with different types or messages, is a difference.
+/// A timing point that holds a note the lenient mode now skips on purpose (no button after the markers, a misplaced touch
+/// area letter, an empty <c>*</c> part, a malformed duration) is not compared note by note, because 2.x read those notes
+/// differently; it is counted in <see cref="IntendedDifferences"/>. 3.x throws for a declaration that is not closed,
+/// where 2.x read to the end of the text; such a failure is intended too. Any other failure in only one parser, or
+/// failures with different types or messages, is a difference.
 /// </para>
 /// </remarks>
 internal sealed class EquivalenceChecker
@@ -98,15 +103,16 @@ internal sealed class EquivalenceChecker
     public long SlideCodeTimings => Interlocked.Read(ref _slideCodeTimings);
 
     /// <summary>
-    /// Gets how many charts had text after an end marker <c>E</c>, or a final <c>||</c>, rewritten for the legacy parser.
+    /// Gets how many charts were rewritten for the legacy parser: cut at an end marker <c>E</c>, or with a final
+    /// <c>||</c>.
     /// </summary>
     public long EndMarkerCharts => Interlocked.Read(ref _endMarkerCharts);
 
     /// <summary>
-    /// Gets the charts with an intended difference, by kind: charts that only the current parser rejects, by the rule
-    /// they break, and charts that are not compared because 2.x lost parts of a long fake each.
+    /// Gets the intended differences, by kind: timing points with notes that 3.x skips, by diagnostic code, and charts
+    /// that are not compared because 2.x lost parts of a long fake each.
     /// </summary>
-    public ConcurrentDictionary<string, long> IntentionalFailures { get; } = new();
+    public ConcurrentDictionary<string, long> IntendedDifferences { get; } = new();
 
     /// <summary>
     /// Compares the metadata, every chart and the deparsed text of a file.
@@ -181,6 +187,11 @@ internal sealed class EquivalenceChecker
         {
             actualError = e;
         }
+        if (actualError is not null && IsUnclosedDeclaration(actualError))
+        {
+            IntendedDifferences.AddOrUpdate("charts with a declaration that is not closed (rejected by 3.x)", 1, (_, count) => count + 1);
+            return null;
+        }
         if (expectedError is not null || actualError is not null)
         {
             var failure = CompareFailures(expectedError, actualError);
@@ -241,9 +252,9 @@ internal sealed class EquivalenceChecker
         {
             actualError = e;
         }
-        if (actualError is not null && expectedError is null && IsIntentional(actualError))
+        if (actualError is not null && IsUnclosedDeclaration(actualError))
         {
-            IntentionalFailures.AddOrUpdate(Categorize(actualError), 1, (_, count) => count + 1);
+            IntendedDifferences.AddOrUpdate("charts with a declaration that is not closed (rejected by 3.x)", 1, (_, count) => count + 1);
             return null;
         }
         if (expectedError is not null || actualError is not null)
@@ -258,7 +269,7 @@ internal sealed class EquivalenceChecker
         if (HasLongFakeEach(fumen))
         {
             // 2.x lost the parts of a fake each after the eighth; 3.x keeps them all.
-            IntentionalFailures.AddOrUpdate("fake each with 9 or more parts (not compared)", 1, (_, count) => count + 1);
+            IntendedDifferences.AddOrUpdate("charts with a fake each of 9 or more parts (not compared)", 1, (_, count) => count + 1);
             return chart!.NoteTimings.Length >= expected!.NoteTimings.Length ? null : "A long fake each lost parts.";
         }
         foreach (var timing in expected!.NoteTimings)
@@ -350,11 +361,25 @@ internal sealed class EquivalenceChecker
         var actualCommas = actual.CommaTimings.Select(t => t with { RawTextPositionX = 0, HSpeed = 1 }).ToArray();
         for (var i = 0; i < Math.Min(expectedNotes.Length, actualNotes.Length); i++)
         {
+            var skip = false;
             if (HasSlideCode(actualNotes[i].RawContent))
             {
                 Interlocked.Increment(ref _slideCodeTimings);
-                expectedNotes[i] = expectedNotes[i] with { Notes = Array.Empty<LegacyNoteView>() };
-                actualNotes[i] = actualNotes[i] with { Notes = Array.Empty<LegacyNoteView>() };
+                skip = true;
+            }
+            else if (ViewComparer.FindDifference(expectedNotes[i], actualNotes[i]) is not null)
+            {
+                var code = FindSkippedNoteCode(actualNotes[i].RawContent);
+                if (code is not null)
+                {
+                    IntendedDifferences.AddOrUpdate($"timing points with a note skipped by 3.x ({code})", 1, (_, count) => count + 1);
+                    skip = true;
+                }
+            }
+            if (skip)
+            {
+                expectedNotes[i] = expectedNotes[i] with { Notes = Array.Empty<LegacyNoteView>(), IsEmpty = true };
+                actualNotes[i] = actualNotes[i] with { Notes = Array.Empty<LegacyNoteView>(), IsEmpty = true };
             }
         }
         expected = expected with { NoteTimings = expectedNotes, CommaTimings = expectedCommas };
@@ -380,31 +405,36 @@ internal sealed class EquivalenceChecker
     }
 
     /// <summary>
-    /// Gets whether an exception comes from a rule 3.x added on purpose.
+    /// Gets whether an exception of the current parser is for a declaration that is not closed.
     /// </summary>
-    /// <param name="error">The exception of the current parser.</param>
-    /// <returns><see langword="true"/> for note errors and unclosed declarations.</returns>
-    private static bool IsIntentional(Exception error)
+    /// <param name="error">The exception.</param>
+    /// <returns><see langword="true"/> for the unclosed declaration error.</returns>
+    private static bool IsUnclosedDeclaration(Exception error)
     {
-        return error is InvalidSimaiNoteException ||
-               (error is InvalidSimaiSyntaxException && error.Message.Contains("is not closed", StringComparison.Ordinal));
+        return error is InvalidSimaiSyntaxException && error.Message.Contains("is not closed", StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Names the rule an intentional failure breaks.
+    /// Reads the notes of a timing point as the lenient mode does, collecting what it skips, and finds a note that the
+    /// lenient mode skips on purpose, where 2.x read something else.
     /// </summary>
-    /// <param name="error">The exception.</param>
-    /// <returns>A short category.</returns>
-    private static string Categorize(Exception error)
+    /// <param name="rawContent">The note text of the timing point.</param>
+    /// <returns>The diagnostic code of the first such note, or <see langword="null"/>.</returns>
+    private static string? FindSkippedNoteCode(string rawContent)
     {
-        var message = error.Message;
-        var known = new[]
+        var diagnostics = new List<SimaiDiagnostic>();
+        var reporter = new SyntaxReporter(diagnostics, null, 0, SimaiSyntaxTolerance.Lenient);
+        using var notes = new PooledBuffer<ParsedNote>();
+        NoteReader.ReadTimingPoint(new NoteSource(0, 120, rawContent.AsSpan(), 1, 1, reporter), notes);
+        var skippedCodes = new[]
         {
-            "has no button or sensor", "touch area letter", "has an empty part", "has ']' before '['",
-            "too many ':' or '#'", "text between the '#'", "is not closed",
+            SimaiDiagnosticCodes.EmptyNote,
+            SimaiDiagnosticCodes.MisplacedTouchArea,
+            SimaiDiagnosticCodes.EmptySameHeadPart,
+            SimaiDiagnosticCodes.MalformedDuration,
         };
 
-        return known.FirstOrDefault(k => message.Contains(k, StringComparison.Ordinal)) ?? message;
+        return diagnostics.FirstOrDefault(d => skippedCodes.Contains(d.Code))?.Code;
     }
 
     /// <summary>
@@ -434,12 +464,8 @@ internal sealed class EquivalenceChecker
         var isShortDeclaration = expected.GetType().Name == "InvalidSimaiMarkupException" &&
                                  (expected.Message is "Unexpected character \"(\"" or "Unexpected character \"{\"" or "Unexpected character \"<\"") &&
                                  actual is InvalidSimaiMarkupException;
-        // 2.x read an unclosed declaration to the end of the text and failed on its value; 3.x reports it as unclosed.
-        var isUnclosedDeclaration = expected.GetType().Name.StartsWith("InvalidSimai", StringComparison.Ordinal) &&
-                                    actual is InvalidSimaiSyntaxException &&
-                                    actual.Message.Contains("is not closed", StringComparison.Ordinal);
 
-        return isShortDeclaration || isUnclosedDeclaration ? null : $"Failures differ: expected {expectedView}, actual {actualView}";
+        return isShortDeclaration ? null : $"Failures differ: expected {expectedView}, actual {actualView}";
     }
 
     /// <summary>

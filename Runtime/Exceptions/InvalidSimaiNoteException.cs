@@ -1,8 +1,10 @@
 namespace MajSimai;
 
 /// <summary>
-/// Thrown when the text of a note breaks the note grammar, for example a note with no button, a touch area letter that
-/// is not at the start of the note, an empty <c>*</c> part, or a duration with too many separators.
+/// Thrown in <see cref="SimaiSyntaxTolerance.Strict"/> mode when the text of a note breaks the note grammar, for example
+/// a note with no button, a touch area letter that is not at the start of the note, an empty <c>*</c> part, a duration
+/// with too many separators, or a slide whose end button is not allowed for its shape. In lenient mode such notes are
+/// skipped and logged.
 /// </summary>
 /// <remarks>
 /// <see cref="InvalidSimaiMarkupException.Line"/> and <see cref="InvalidSimaiMarkupException.Column"/> point at the start
