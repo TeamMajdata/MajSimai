@@ -4,7 +4,8 @@ using System.Runtime.InteropServices;
 namespace MajSimai.Unmanaged;
 
 /// <summary>
-/// The native layout of a <see cref="SimaiFile"/>.
+/// The native layout of a <see cref="SimaiFile"/>. Its pointers belong to the parse result that holds it and are freed
+/// by <c>MajSimai_Free</c>.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 internal unsafe struct UnmanagedSimaiFile

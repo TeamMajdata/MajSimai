@@ -15,7 +15,8 @@
 namespace MajSimai
 {
     /// A view of a Core::UnmanagedSimaiNote that reads the native memory without copying it. The native layout of a
-    /// SimaiNote. The view stays valid while the ParsedSimaiFile it came from lives.
+    /// SimaiNote. Its pointers belong to the parse result that holds it and are freed by MajSimai_Free. The view stays
+    /// valid while the ParsedSimaiFile it came from lives.
     class SimaiNoteView
     {
     public:
@@ -185,7 +186,8 @@ namespace MajSimai
     };
 
     /// A view of a Core::UnmanagedSimaiTimingPoint that reads the native memory without copying it. The native layout
-    /// of a SimaiTimingPoint. The view stays valid while the ParsedSimaiFile it came from lives.
+    /// of a SimaiTimingPoint. Its pointers belong to the parse result that holds it and are freed by MajSimai_Free. The
+    /// view stays valid while the ParsedSimaiFile it came from lives.
     class SimaiTimingPointView
     {
     public:
@@ -291,7 +293,8 @@ namespace MajSimai
     };
 
     /// A view of a Core::UnmanagedSimaiChart that reads the native memory without copying it. The native layout of a
-    /// SimaiChart. The view stays valid while the ParsedSimaiFile it came from lives.
+    /// SimaiChart. Its pointers belong to the parse result that holds it and are freed by MajSimai_Free. The view stays
+    /// valid while the ParsedSimaiFile it came from lives.
     class SimaiChartView
     {
     public:
@@ -373,7 +376,8 @@ namespace MajSimai
     };
 
     /// A view of a Core::UnmanagedSimaiCommand that reads the native memory without copying it. The native layout of a
-    /// SimaiCommand. The view stays valid while the ParsedSimaiFile it came from lives.
+    /// SimaiCommand. Its pointers belong to the parse result that holds it and are freed by MajSimai_Free. The view
+    /// stays valid while the ParsedSimaiFile it came from lives.
     class SimaiCommandView
     {
     public:
@@ -419,7 +423,8 @@ namespace MajSimai
     };
 
     /// A view of a Core::UnmanagedSimaiFile that reads the native memory without copying it. The native layout of a
-    /// SimaiFile. The view stays valid while the ParsedSimaiFile it came from lives.
+    /// SimaiFile. Its pointers belong to the parse result that holds it and are freed by MajSimai_Free. The view stays
+    /// valid while the ParsedSimaiFile it came from lives.
     class SimaiFileView
     {
     public:

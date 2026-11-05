@@ -78,9 +78,12 @@ public sealed class CppEmitterTests
         var header = CoreHeaderEmitter.Emit(model);
 
         Assert.Contains("MAJSIMAI_API void MAJSIMAI_CDECL MajSimai_Parse(const char* content, int32_t contentLength, UnmanagedSimaiParseResult* result);", header);
-        Assert.Contains("MAJSIMAI_API bool MAJSIMAI_CDECL MajSimai_Free(UnmanagedSimaiParseResult* ptr);", header);
+        Assert.Contains("MAJSIMAI_API void MAJSIMAI_CDECL MajSimai_ParseWithTolerance(const char* content, int32_t contentLength, SimaiSyntaxTolerance tolerance, UnmanagedSimaiParseResult* result);", header);
+        Assert.Contains("MAJSIMAI_API int32_t MAJSIMAI_CDECL MajSimai_Free(UnmanagedSimaiParseResult* ptr);", header);
         Assert.Contains("static constexpr int32_t CODE_INVALID_SIMAI_SYNTAX = 4;", header);
-        Assert.Contains("UnmanagedSimaiFile* simaiFile;", header);
+        Assert.Contains("const UnmanagedSimaiFile* simaiFile;", header);
+        Assert.Contains("enum class SimaiSyntaxTolerance : int32_t", header);
+        Assert.DoesNotContain("bool MAJSIMAI_CDECL", header);
         Assert.Contains("#define MAJSIMAI_CDECL __cdecl", header);
         var fieldCount = model.Structs.Sum(s => s.Fields.Count);
         Assert.Equal(fieldCount, header.Split('\n').Count(l => l.Contains("static_assert(offsetof(", StringComparison.Ordinal)));
@@ -112,16 +115,36 @@ public sealed class CppEmitterTests
     }
 
     /// <summary>
-    /// Parser header: turns the result codes into an enum.
+    /// Parser header: turns the result codes into an enum and takes the syntax tolerance.
     /// </summary>
     [Fact]
-    public void ParserHeader_TurnsTheResultCodesIntoAnEnum()
+    public void ParserHeader_TurnsTheResultCodesIntoAnEnumAndTakesTheTolerance()
     {
         var header = ParserHeaderEmitter.Emit(s_majSimai.Value);
 
         Assert.Contains("InvalidSimaiSyntax = Core::UnmanagedSimaiParseResult::CODE_INVALID_SIMAI_SYNTAX,", header);
-        Assert.Contains("class ParsedSimaiFile : public SimaiFileView", header);
-        Assert.Contains("static SimaiFile Parse(std::string_view content)", header);
+        Assert.Contains("InvalidArgument = Core::UnmanagedSimaiParseResult::CODE_INVALID_ARGUMENT,", header);
+        Assert.Contains("static SimaiFile Parse(std::string_view content, SimaiSyntaxTolerance tolerance = SimaiSyntaxTolerance::Lenient)", header);
+        Assert.Contains("Core::MajSimai_ParseWithTolerance(content.data(), static_cast<int32_t>(content.size()), tolerance, &result);", header);
+    }
+
+    /// <summary>
+    /// Parser header: has a single owner that is not a view, cannot be copied, and only gives views from an lvalue.
+    /// </summary>
+    [Fact]
+    public void ParserHeader_HasASingleOwnerThatOnlyGivesViewsFromAnLvalue()
+    {
+        var header = ParserHeaderEmitter.Emit(s_majSimai.Value);
+
+        Assert.Contains("class ParsedSimaiFile\n", header);
+        Assert.DoesNotContain("class ParsedSimaiFile : public", header);
+        Assert.Contains("ParsedSimaiFile(const ParsedSimaiFile&) = delete;", header);
+        Assert.Contains("SimaiFileView GetFile() const&\n", header);
+        Assert.Contains("SimaiFileView GetFile() const&& = delete;", header);
+        Assert.Contains("        explicit ParsedSimaiFile(Core::UnmanagedSimaiParseResult& result) noexcept", header);
+        Assert.True(header.IndexOf("ParsedSimaiFile parsed(result);", StringComparison.Ordinal) < header.IndexOf("throw parsed.CreateException();", StringComparison.Ordinal));
+        var privateSection = header.IndexOf("friend class SimaiParser;", StringComparison.Ordinal);
+        Assert.True(privateSection > 0 && privateSection < header.IndexOf("explicit ParsedSimaiFile(Core::UnmanagedSimaiParseResult& result)", StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -142,6 +165,7 @@ public sealed class CppEmitterTests
         var error = Assert.Throws<CppGenException>(() => ParserHeaderEmitter.Emit(broken));
 
         Assert.Contains("MajSimai_Free(UnmanagedSimaiParseResult*)", error.Message);
+        Assert.DoesNotContain("MajSimai_ParseWithTolerance", error.Message);
         Assert.Contains("UnmanagedSimaiParseResult::errorMsg (String)", error.Message);
         Assert.DoesNotContain("errorContent", error.Message);
     }

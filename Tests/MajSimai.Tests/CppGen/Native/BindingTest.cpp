@@ -1,12 +1,13 @@
 // Parses simai files with the generated C++ wrapper and prints a dump of the results that CppBindingTests compares
 // with the same dump written from the C# parser.
 //
-// Usage: BindingTest <dump file> <file | --empty>...
+// Usage: BindingTest <dump file> [--lenient | --strict | --empty | <file>]...
 //
-// The dump goes to a file rather than to standard output, which MajSimai's default logger writes to. For every input
-// the dump is made twice, once from the views (ParseAsView) and once from the owned model (Parse);
-// the program fails when the two differ. Numbers are printed as the hex of their bits, so the C# and C++ dumps match
-// exactly. --empty parses empty content, which must fail.
+// --lenient and --strict set the syntax tolerance of the inputs that follow (lenient at first); --empty parses empty
+// content, which must fail. The dump goes to a file rather than to standard output, which MajSimai's default logger
+// writes to. For every input the dump is made twice, once from the views (ParseAsView) and once from the owned model
+// (Parse); the program fails when the two differ. Numbers are printed as the hex of their bits, so the C# and C++ dumps
+// match exactly. Before the inputs, the program checks the ownership rules of ParsedSimaiFile.
 
 #include "MajSimai/MajSimai.h"
 
@@ -215,15 +216,20 @@ namespace
     }
 
     // Parses one input and prints its dump or its error. Returns false when the view and the model disagree.
-    bool Run(std::ostream& out, const std::string& content)
+    bool Run(std::ostream& out, const std::string& content, MajSimai::SimaiSyntaxTolerance tolerance)
     {
         try
         {
-            MajSimai::ParsedSimaiFile parsed = MajSimai::SimaiParser::ParseAsView(content);
+            MajSimai::ParsedSimaiFile parsed = MajSimai::SimaiParser::ParseAsView(content, tolerance);
             MajSimai::ParsedSimaiFile moved = std::move(parsed);
-            const auto fromView = Dump(moved);
-            const auto fromModel = Dump(MajSimai::SimaiParser::Parse(content));
-            if (fromView != fromModel)
+            if (parsed || !moved)
+            {
+                std::cerr << "Moving a ParsedSimaiFile did not move the ownership.\n";
+                return false;
+            }
+            const auto fromView = Dump(moved.GetFile());
+            const auto fromModel = Dump(MajSimai::SimaiParser::Parse(content, tolerance));
+            if (fromView != fromModel || fromView != Dump(moved.ToModel()))
             {
                 std::cerr << "The view and the model differ.\n--- view\n" << fromView << "--- model\n" << fromModel;
                 return false;
@@ -239,21 +245,55 @@ namespace
 
         return true;
     }
+
+    // Checks that an empty ParsedSimaiFile owns nothing and refuses to hand out a view.
+    bool CheckEmptyOwner()
+    {
+        MajSimai::ParsedSimaiFile empty;
+        if (empty)
+        {
+            return false;
+        }
+        try
+        {
+            empty.GetFile();
+            return false;
+        }
+        catch (const std::logic_error&)
+        {
+        }
+        auto assigned = MajSimai::SimaiParser::ParseAsView("&title=a\n&inote_1=1,");
+        assigned = MajSimai::SimaiParser::ParseAsView("&title=b\n");
+
+        return assigned && assigned.GetFile().GetTitle() == "b";
+    }
 }
 
 int main(int argc, char** argv)
 {
     if (argc < 2)
     {
-        std::cerr << "Usage: BindingTest <dump file> <file | --empty>...\n";
+        std::cerr << "Usage: BindingTest <dump file> [--lenient | --strict | --empty | <file>]...\n";
         return 2;
     }
+    if (!CheckEmptyOwner())
+    {
+        std::cerr << "An empty or reassigned ParsedSimaiFile does not behave as documented.\n";
+        return 5;
+    }
     std::ofstream out(argv[1], std::ios::binary);
+    auto tolerance = MajSimai::SimaiSyntaxTolerance::Lenient;
     for (auto i = 2; i < argc; i++)
     {
         const std::string argument = argv[i];
-        out << "input " << (argument == "--empty" ? "--empty" : "file") << '\n';
-        if (!Run(out, argument == "--empty" ? std::string() : ReadFile(argv[i])))
+        if (argument == "--lenient" || argument == "--strict")
+        {
+            tolerance = argument == "--strict" ? MajSimai::SimaiSyntaxTolerance::Strict : MajSimai::SimaiSyntaxTolerance::Lenient;
+            continue;
+        }
+        const auto strict = tolerance == MajSimai::SimaiSyntaxTolerance::Strict;
+        out << "input " << (argument == "--empty" ? "--empty" : "file") << (strict ? " strict" : " lenient") << '\n';
+        if (!Run(out, argument == "--empty" ? std::string() : ReadFile(argv[i]), tolerance))
         {
             return 3;
         }

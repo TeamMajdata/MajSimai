@@ -11,21 +11,21 @@ using Xunit;
 namespace MajSimai.Tests.CppGen;
 
 /// <summary>
-/// Compiles the generated C++ wrapper with a real C++ compiler and, when a native build of MajSimai is given, runs it
-/// and compares its results with the C# parser.
+/// Compiles the generated C++ wrapper with a real C++ compiler and, when a package of a native build is given, links
+/// it with CMake, runs it and compares its results with the C# parser.
 /// </summary>
 /// <remarks>
 /// The tests need a C++17 compiler: the one in the <c>CXX</c> environment variable, or <c>c++</c>, <c>g++</c> or
-/// <c>clang++</c> on the path. The end-to-end test also needs <see cref="NativeLibraryVariable"/>, the path of MajSimai
-/// published with native AOT for this platform, for example
-/// <c>dotnet publish MajSimai.csproj -c Release -f net10.0 -r linux-x64 -p:PublishAot=true -o out</c>.
+/// <c>clang++</c> on the path. The end-to-end test also needs CMake and <see cref="PackageVariable"/>, a package made by
+/// <c>python tools/build-cpp-package.py --kind shared|static</c>.
 /// </remarks>
 public sealed class CppBindingNativeTests : IDisposable
 {
     /// <summary>
-    /// The environment variable that holds the path of the native MajSimai library.
+    /// The environment variable that holds the folder of a package made by <c>tools/build-cpp-package.py</c>, absolute
+    /// or relative to the repository.
     /// </summary>
-    public const string NativeLibraryVariable = "MAJSIMAI_NATIVE_LIBRARY";
+    public const string PackageVariable = "MAJSIMAI_CPP_PACKAGE";
 
     /// <summary>
     /// The number of sample files the end-to-end test runs when the sample directory is set.
@@ -40,7 +40,7 @@ public sealed class CppBindingNativeTests : IDisposable
     /// <summary>
     /// Gets the path of the C++ test program.
     /// </summary>
-    private static string TestProgram => Path.Combine(CppBindingGeneratorTests.CheckedInWrapper, "..", "..", "Tests", "MajSimai.Tests", "CppGen", "Native", "BindingTest.cpp");
+    private static string TestProgram => Path.GetFullPath(Path.Combine(CppBindingGeneratorTests.CheckedInWrapper, "..", "..", "Tests", "MajSimai.Tests", "CppGen", "Native", "BindingTest.cpp"));
 
     /// <summary>
     /// Gets the include directory of the wrapper.
@@ -76,43 +76,106 @@ public sealed class CppBindingNativeTests : IDisposable
     }
 
     /// <summary>
-    /// Wrapper: gives the same results as the C# parser when linked with the native library.
+    /// Unsafe ownership: code that would read freed native memory or free it twice does not compile.
     /// </summary>
-    [Fact]
-    public void Wrapper_GivesTheSameResultsAsTheCSharpParser()
+    /// <param name="statement">A statement that misuses the owner of a parse result.</param>
+    /// <param name="expectedError">A word of the compiler error, the same for GCC and Clang.</param>
+    [Theory]
+    [InlineData("auto view = MajSimai::SimaiParser::ParseAsView(\"x\").GetFile();", "deleted")]
+    [InlineData("MajSimai::SimaiFileView view = MajSimai::SimaiParser::ParseAsView(\"x\");", "conversion")]
+    [InlineData("auto parsed = MajSimai::SimaiParser::ParseAsView(\"x\"); auto copy = parsed;", "deleted")]
+    [InlineData("MajSimai::Core::UnmanagedSimaiParseResult result{}; MajSimai::ParsedSimaiFile parsed(result);", "private")]
+    public void UnsafeOwnership_DoesNotCompile(string statement, string expectedError)
     {
         var compiler = FindCompiler();
-        var library = Environment.GetEnvironmentVariable(NativeLibraryVariable);
         Assert.SkipWhen(compiler is null, "No C++ compiler found; set CXX to run this test.");
-        Assert.SkipWhen(string.IsNullOrEmpty(library), $"Set {NativeLibraryVariable} to MajSimai published with native AOT to run this test.");
-        Assert.SkipUnless(OperatingSystem.IsLinux(), "The test links with GNU linker options, so it only runs on Linux.");
         Directory.CreateDirectory(_work);
-        var program = Path.Combine(_work, "BindingTest");
-        var libraryDirectory = Path.GetDirectoryName(Path.GetFullPath(library!))!;
-        var (buildExit, buildOutput) = RunProcess(compiler!, $"-std=c++17 -O1 -I \"{IncludeDirectory}\" \"{TestProgram}\" -o \"{program}\" -L \"{libraryDirectory}\" -l:{Path.GetFileName(library)} -Wl,-rpath,\"{libraryDirectory}\"");
-        Assert.True(buildExit == 0, buildOutput);
+        var source = Path.Combine(_work, "misuse.cpp");
+        File.WriteAllText(source, $"#include \"MajSimai/MajSimai.h\"\nint main()\n{{\n    {statement}\n    return 0;\n}}\n");
 
-        var inputs = WriteInputs();
+        var (exitCode, output) = RunProcess(compiler!, $"-std=c++17 -fsyntax-only -I \"{IncludeDirectory}\" \"{source}\"");
+
+        Assert.NotEqual(0, exitCode);
+        Assert.Contains(expectedError, output);
+    }
+
+    /// <summary>
+    /// Package: gives the same results as the C# parser in lenient and strict mode.
+    /// </summary>
+    [Fact]
+    public void Package_GivesTheSameResultsAsTheCSharpParser()
+    {
+        var cmake = FindProgram("cmake");
+        var package = Environment.GetEnvironmentVariable(PackageVariable);
+        Assert.SkipWhen(cmake is null, "CMake was not found on the path.");
+        Assert.SkipWhen(string.IsNullOrEmpty(package), $"Set {PackageVariable} to a package made by tools/build-cpp-package.py to run this test.");
+        var repository = Path.GetFullPath(Path.Combine(CppBindingGeneratorTests.CheckedInWrapper, "..", ".."));
+        var program = BuildTestProgram(cmake!, Path.GetFullPath(package!, repository));
+        var files = WriteInputs();
+        var inputs = files.Select(f => (Path: f, Strict: false)).Concat(files.Select(f => (Path: f, Strict: true))).ToArray();
         var dump = Path.Combine(_work, "dump.txt");
-        var (exitCode, output) = RunProcess(program, $"\"{dump}\" " + string.Join(" ", inputs.Select(i => i is null ? "--empty" : $"\"{i}\"")));
+        var arguments = new StringBuilder($"\"{dump}\"");
+        foreach (var strict in new[] { false, true })
+        {
+            arguments.Append(strict ? " --strict" : " --lenient");
+            foreach (var file in files)
+            {
+                arguments.Append(file is null ? " --empty" : $" \"{file}\"");
+            }
+        }
+
+        var (exitCode, output) = RunProcess(program, arguments.ToString());
 
         Assert.True(exitCode == 0, output);
         using var reader = new StreamReader(dump, Encoding.UTF8);
-        foreach (var input in inputs)
+        foreach (var (path, strict) in inputs)
         {
-            var expected = input is null
-                ? "input --empty\n" + NativeDump.WriteError(UnmanagedSimaiParseResult.CODE_INVALID_CONTENT, "The content is empty.")
-                : "input file\n" + NativeDump.Write(ParseFile(input));
+            var expected = Expect(path, strict);
             var actual = new char[expected.Length];
             var read = reader.ReadBlock(actual, 0, actual.Length);
-            Assert.True(expected == new string(actual, 0, read), $"The C++ result differs for {input ?? "--empty"}:\n{new string(actual, 0, read)}\nExpected:\n{expected}");
+            Assert.True(expected == new string(actual, 0, read), $"The C++ result differs for {path ?? "--empty"} (strict: {strict}):\n{new string(actual, 0, read)}\nExpected:\n{expected}");
         }
         Assert.Equal(-1, reader.Peek());
     }
 
     /// <summary>
-    /// Writes the inputs of the end-to-end test: handmade files that cover UTF-8, byte order marks, line breaks and
-    /// every note kind, then up to <see cref="SampleCount"/> sample files.
+    /// Builds <c>Native/BindingTest.cpp</c> with CMake against a package, the way a user project adds it.
+    /// </summary>
+    /// <param name="cmake">The CMake command.</param>
+    /// <param name="package">The folder of the package.</param>
+    /// <returns>The path of the built program.</returns>
+    private string BuildTestProgram(string cmake, string package)
+    {
+        var project = Path.Combine(_work, "project");
+        Directory.CreateDirectory(project);
+        File.WriteAllText(Path.Combine(project, "CMakeLists.txt"), $$"""
+            cmake_minimum_required(VERSION 3.15)
+            project(BindingTest LANGUAGES CXX)
+            add_subdirectory("{{package.Replace('\\', '/')}}" majsimai)
+            add_executable(BindingTest "{{TestProgram.Replace('\\', '/')}}")
+            target_link_libraries(BindingTest PRIVATE MajSimai::MajSimaiCpp)
+            get_target_property(MAJSIMAI_NATIVE_TYPE MajSimai::Native TYPE)
+            if(WIN32 AND MAJSIMAI_NATIVE_TYPE STREQUAL "SHARED_LIBRARY")
+                add_custom_command(TARGET BindingTest POST_BUILD
+                    COMMAND "${CMAKE_COMMAND}" -E copy_if_different "$<TARGET_FILE:MajSimai::Native>" "$<TARGET_FILE_DIR:BindingTest>")
+            endif()
+            """);
+        var build = Path.Combine(project, "build");
+        var (configureExit, configureOutput) = RunProcess(cmake, $"-S \"{project}\" -B \"{build}\" -DCMAKE_BUILD_TYPE=Release");
+        Assert.True(configureExit == 0, configureOutput);
+        var (buildExit, buildOutput) = RunProcess(cmake, $"--build \"{build}\" --config Release");
+        Assert.True(buildExit == 0, buildOutput);
+        var program = new[] { "BindingTest", "BindingTest.exe", Path.Combine("Release", "BindingTest.exe") }
+                      .Select(p => Path.Combine(build, p))
+                      .FirstOrDefault(File.Exists);
+        Assert.True(program is not null, "CMake did not build BindingTest.");
+
+        return program!;
+    }
+
+    /// <summary>
+    /// Writes the inputs of the end-to-end test: handmade files that cover UTF-8, byte order marks, line breaks, strict
+    /// errors and every note kind, then up to <see cref="SampleCount"/> sample files.
     /// </summary>
     /// <returns>The paths of the files, and <see langword="null"/> for the empty input.</returns>
     private List<string?> WriteInputs()
@@ -124,6 +187,7 @@ public sealed class CppBindingNativeTests : IDisposable
             "﻿&title=BOM\n&inote_1=(60)1,2,3,4,\n&inote_2=(60){4}1/8,1<5[4:1]/2-6[4:1],\n",
             "&title=no charts\n",
             "&inote_3=(120)1,{4\n",
+            "&inote_1=(120)1,\n&inote_4=(120)1/b/2,星,\n",
         };
         for (var i = 0; i < handmade.Length; i++)
         {
@@ -147,15 +211,33 @@ public sealed class CppBindingNativeTests : IDisposable
     }
 
     /// <summary>
-    /// Parses a file the way <c>MajSimai_Parse</c> does: from its bytes, as UTF-8 unless it has a byte order mark.
+    /// Writes what the C++ program must print for an input, from the C# parser: it reads the bytes of the file the way
+    /// <c>MajSimai_ParseWithTolerance</c> does, as UTF-8 unless the file has a byte order mark.
     /// </summary>
-    /// <param name="path">The path of the file.</param>
-    /// <returns>The parsed file.</returns>
-    private static SimaiFile ParseFile(string path)
+    /// <param name="path">The path of the file, or <see langword="null"/> for the empty input.</param>
+    /// <param name="strict">Whether the input is parsed in strict mode.</param>
+    /// <returns>The expected records.</returns>
+    private static string Expect(string? path, bool strict)
     {
-        using var stream = new MemoryStream(File.ReadAllBytes(path));
+        var header = $"input {(path is null ? "--empty" : "file")} {(strict ? "strict" : "lenient")}\n";
+        if (path is null)
+        {
+            return header + NativeDump.WriteError(UnmanagedSimaiParseResult.CODE_INVALID_CONTENT, -1, -1, "The content is empty.", string.Empty);
+        }
+        try
+        {
+            using var stream = new MemoryStream(File.ReadAllBytes(path));
 
-        return SimaiParser.Parse(stream);
+            return header + NativeDump.Write(SimaiParser.Parse(stream, strict ? SimaiParserOptions.Strict : SimaiParserOptions.Lenient));
+        }
+        catch (InvalidSimaiMarkupException e)
+        {
+            var code = e is InvalidSimaiSyntaxException
+                ? UnmanagedSimaiParseResult.CODE_INVALID_SIMAI_SYNTAX
+                : UnmanagedSimaiParseResult.CODE_INVALID_SIMAI_MARKUP;
+
+            return header + NativeDump.WriteError(code, e.Line, e.Column, e.Message, e.Content);
+        }
     }
 
     /// <summary>
@@ -165,18 +247,30 @@ public sealed class CppBindingNativeTests : IDisposable
     private static string? FindCompiler()
     {
         var configured = Environment.GetEnvironmentVariable("CXX");
-        if (!string.IsNullOrEmpty(configured))
-        {
-            return configured;
-        }
+
+        return string.IsNullOrEmpty(configured) ? FindProgram("c++", "g++", "clang++") : configured;
+    }
+
+    /// <summary>
+    /// Finds the first of several programs on the path.
+    /// </summary>
+    /// <param name="names">The program names, in order of preference.</param>
+    /// <returns>The full path of the program, or <see langword="null"/> when none is on the path.</returns>
+    private static string? FindProgram(params string[] names)
+    {
         var path = Environment.GetEnvironmentVariable("PATH") ?? string.Empty;
-        foreach (var name in new[] { "c++", "g++", "clang++" })
+        var extensions = OperatingSystem.IsWindows() ? new[] { ".exe", string.Empty } : new[] { string.Empty };
+        foreach (var name in names)
         {
             foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
             {
-                if (File.Exists(Path.Combine(directory, name)))
+                foreach (var extension in extensions)
                 {
-                    return Path.Combine(directory, name);
+                    var candidate = Path.Combine(directory, name + extension);
+                    if (File.Exists(candidate))
+                    {
+                        return candidate;
+                    }
                 }
             }
         }

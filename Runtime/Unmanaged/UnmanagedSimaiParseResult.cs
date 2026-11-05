@@ -4,7 +4,10 @@ using System.Runtime.InteropServices;
 namespace MajSimai.Unmanaged;
 
 /// <summary>
-/// The result of <c>MajSimai_Parse</c>: a parsed file, or the error that stopped the parse.
+/// The result of <c>MajSimai_Parse</c> and <c>MajSimai_ParseWithTolerance</c>: a parsed file, or the error that stopped
+/// the parse. The caller owns the result and frees it with <c>MajSimai_Free</c>; all the memory it points to belongs to
+/// it, so never free those pointers yourself, never keep them after <c>MajSimai_Free</c>, and never free two copies of
+/// one result.
 /// </summary>
 [StructLayout(LayoutKind.Sequential)]
 public unsafe ref struct UnmanagedSimaiParseResult
@@ -23,6 +26,9 @@ public unsafe ref struct UnmanagedSimaiParseResult
 
     /// <summary>The content has a malformed declaration, such as a BPM change that is not closed.</summary>
     public const int CODE_INVALID_SIMAI_SYNTAX = 4;
+
+    /// <summary>An argument other than the content is not valid, such as an unknown syntax tolerance.</summary>
+    public const int CODE_INVALID_ARGUMENT = 5;
 
     /// <summary>One of the <c>CODE_</c> constants.</summary>
     public required int code;

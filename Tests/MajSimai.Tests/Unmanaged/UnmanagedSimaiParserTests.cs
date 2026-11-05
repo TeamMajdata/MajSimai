@@ -29,7 +29,7 @@ public sealed unsafe class UnmanagedSimaiParserTests
         }
         finally
         {
-            Assert.True(Free(&result));
+            Assert.Equal(1, Free(&result));
         }
         Assert.True(result.simaiFile is null);
     }
@@ -135,16 +135,89 @@ public sealed unsafe class UnmanagedSimaiParserTests
     }
 
     /// <summary>
-    /// Free: returns false for null pointers.
+    /// Parse with tolerance: reports the first strict error with its code, position and content.
+    /// </summary>
+    /// <param name="chart">The chart text.</param>
+    /// <param name="code">The expected code.</param>
+    [Theory]
+    [InlineData("(120)1,{4", UnmanagedSimaiParseResult.CODE_INVALID_SIMAI_SYNTAX)]
+    [InlineData("(120)1/b/2,", UnmanagedSimaiParseResult.CODE_INVALID_SIMAI_MARKUP)]
+    public void ParseWithTolerance_ReportsTheFirstStrictError(string chart, int code)
+    {
+        var text = "&title=Strict\n&inote_2=" + chart;
+        var expected = Assert.ThrowsAny<InvalidSimaiMarkupException>(() => SimaiParser.Parse(text.AsSpan(), string.Empty, SimaiParserOptions.Strict));
+
+        var result = ParseWithTolerance(Encoding.UTF8.GetBytes(text), SimaiSyntaxTolerance.Strict);
+        try
+        {
+            Assert.Equal(code, result.code);
+            Assert.True(result.simaiFile is null);
+            Assert.Equal(expected.Line, result.errorAtLine);
+            Assert.Equal(expected.Column, result.errorAtColumn);
+            Assert.Equal(expected.Message, Marshal.PtrToStringUTF8((nint)result.errorMsg, result.errorMsgLen));
+            Assert.Equal(expected.Content, Marshal.PtrToStringUTF8((nint)result.errorContent, result.errorContentLen));
+        }
+        finally
+        {
+            Assert.Equal(1, Free(&result));
+        }
+    }
+
+    /// <summary>
+    /// Parse with tolerance: keeps a failed chart in lenient mode, like MajSimai_Parse.
     /// </summary>
     [Fact]
-    public void Free_ReturnsFalseForNullPointers()
+    public void ParseWithTolerance_KeepsAFailedChartInLenientMode()
     {
-        delegate* unmanaged[Cdecl]<nint, bool> freeHGlobal = &UnmanagedSimaiParser.Free;
+        var result = ParseWithTolerance(Encoding.UTF8.GetBytes("&inote_1=(120)1,{4\n&inote_2=(120)1,"), SimaiSyntaxTolerance.Lenient);
+        try
+        {
+            Assert.Equal(UnmanagedSimaiParseResult.CODE_NO_ERROR, result.code);
+            var file = (UnmanagedSimaiFile*)result.simaiFile;
+            Assert.True(file->charts[0].isEmpty);
+            Assert.Equal(1, file->charts[1].noteTimingsLen);
+        }
+        finally
+        {
+            Free(&result);
+        }
+    }
 
-        Assert.False(Free(null));
-        Assert.False(freeHGlobal(0));
-        Assert.True(freeHGlobal(Marshal.AllocHGlobal(4)));
+    /// <summary>
+    /// Parse with tolerance: rejects an unknown tolerance.
+    /// </summary>
+    [Fact]
+    public void ParseWithTolerance_RejectsAnUnknownTolerance()
+    {
+        var result = ParseWithTolerance(Encoding.UTF8.GetBytes("&inote_1=1,"), (SimaiSyntaxTolerance)7);
+        try
+        {
+            Assert.Equal(UnmanagedSimaiParseResult.CODE_INVALID_ARGUMENT, result.code);
+            Assert.True(result.simaiFile is null);
+            Assert.Equal("The tolerance 7 is neither lenient (0) nor strict (1).", Marshal.PtrToStringUTF8((nint)result.errorMsg, result.errorMsgLen));
+        }
+        finally
+        {
+            Free(&result);
+        }
+    }
+
+    /// <summary>
+    /// Free: returns 1 when it freed something and 0 for null pointers, and a freed result can be freed again.
+    /// </summary>
+    [Fact]
+    public void Free_ReturnsOneWhenItFreedSomethingAndZeroForNullPointers()
+    {
+        delegate* unmanaged[Cdecl]<nint, int> freeHGlobal = &UnmanagedSimaiParser.Free;
+        var result = Parse(Encoding.UTF8.GetBytes("&inote_1=1,"));
+
+        Assert.Equal(1, Free(&result));
+        Assert.Equal(1, Free(&result));
+        Assert.True(result.simaiFile is null);
+        Assert.Equal(-1, result.code);
+        Assert.Equal(0, Free(null));
+        Assert.Equal(0, freeHGlobal(0));
+        Assert.Equal(1, freeHGlobal(Marshal.AllocHGlobal(4)));
     }
 
     /// <summary>
@@ -165,13 +238,31 @@ public sealed unsafe class UnmanagedSimaiParserTests
     }
 
     /// <summary>
+    /// Calls <c>MajSimai_ParseWithTolerance</c> through an unmanaged function pointer.
+    /// </summary>
+    /// <param name="content">The content.</param>
+    /// <param name="tolerance">The syntax tolerance.</param>
+    /// <returns>The result; free it with <see cref="Free"/>.</returns>
+    private static UnmanagedSimaiParseResult ParseWithTolerance(byte[] content, SimaiSyntaxTolerance tolerance)
+    {
+        delegate* unmanaged[Cdecl]<byte*, int, SimaiSyntaxTolerance, UnmanagedSimaiParseResult*, void> parse = &UnmanagedSimaiParser.ParseWithTolerance;
+        var result = new UnmanagedSimaiParseResult { code = -1 };
+        fixed (byte* pointer = content)
+        {
+            parse(pointer, content.Length, tolerance, &result);
+        }
+
+        return result;
+    }
+
+    /// <summary>
     /// Calls <c>MajSimai_Free</c> through an unmanaged function pointer.
     /// </summary>
     /// <param name="result">The result to free.</param>
     /// <returns>What <c>MajSimai_Free</c> returned.</returns>
-    private static bool Free(UnmanagedSimaiParseResult* result)
+    private static int Free(UnmanagedSimaiParseResult* result)
     {
-        delegate* unmanaged[Cdecl]<UnmanagedSimaiParseResult*, bool> free = &UnmanagedSimaiParser.Free;
+        delegate* unmanaged[Cdecl]<UnmanagedSimaiParseResult*, int> free = &UnmanagedSimaiParser.Free;
 
         return free(result);
     }

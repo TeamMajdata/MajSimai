@@ -17,7 +17,7 @@
 
 namespace MajSimai
 {
-    /// Why MajSimai_Parse failed: the CODE_ constants of Core::UnmanagedSimaiParseResult.
+    /// Why MajSimai_ParseWithTolerance failed: the CODE_ constants of Core::UnmanagedSimaiParseResult.
     enum class SimaiParseErrorCode : int32_t
     {
         /// The file was parsed.
@@ -30,9 +30,11 @@ namespace MajSimai
         InvalidSimaiMarkup = Core::UnmanagedSimaiParseResult::CODE_INVALID_SIMAI_MARKUP,
         /// The content has a malformed declaration, such as a BPM change that is not closed.
         InvalidSimaiSyntax = Core::UnmanagedSimaiParseResult::CODE_INVALID_SIMAI_SYNTAX,
+        /// An argument other than the content is not valid, such as an unknown syntax tolerance.
+        InvalidArgument = Core::UnmanagedSimaiParseResult::CODE_INVALID_ARGUMENT,
     };
 
-    /// Thrown when MajSimai cannot parse a file.
+    /// Thrown when MajSimai cannot parse a file. The exception owns copies of the texts of the error.
     class SimaiParseException : public std::runtime_error
     {
     public:
@@ -54,7 +56,7 @@ namespace MajSimai
             return m_code;
         }
 
-        /// Gets the line of the error.
+        /// Gets the line of the error. In strict mode it is counted in the text of the chart that failed.
         /// @return The line, starting from 1, or -1 when the error has no position.
         int32_t GetLine() const noexcept
         {
@@ -82,115 +84,167 @@ namespace MajSimai
         std::string m_content;
     };
 
-    /// A file parsed by MajSimai and kept in native memory, which is freed when the object is destroyed. It is
-    /// a SimaiFileView of that memory; views taken from it stay valid while it lives. A moved-from object must
-    /// not be read.
-    class ParsedSimaiFile : public SimaiFileView
+    class SimaiParser;
+
+    /// A file parsed by MajSimai and kept in native memory. The object is the only owner of that memory and
+    /// frees it with MajSimai_Free when it is destroyed; it can be moved but not copied, and the object it
+    /// is moved from becomes empty. Views returned by GetFile() read the native memory, so they must not
+    /// outlive this object; GetFile() is not available on a temporary for that reason. ToModel() copies the
+    /// file into owned data that stays valid after this object is destroyed.
+    class ParsedSimaiFile
     {
     public:
-        /// Takes ownership of a successful parse result.
-        /// @param result The result of MajSimai_Parse; it is freed with MajSimai_Free by this object.
-        explicit ParsedSimaiFile(const Core::UnmanagedSimaiParseResult& result) noexcept
-            : SimaiFileView(result.simaiFile), m_result(result)
-        {
-        }
+        /// Creates an empty object that owns nothing.
+        ParsedSimaiFile() noexcept = default;
 
         /// Frees the native memory.
         ~ParsedSimaiFile()
         {
-            Core::MajSimai_Free(&m_result);
+            Reset();
         }
 
         ParsedSimaiFile(const ParsedSimaiFile&) = delete;
         ParsedSimaiFile& operator=(const ParsedSimaiFile&) = delete;
 
-        /// Takes the native memory of another object.
+        /// Takes the native memory of another object, which becomes empty.
         /// @param other The object to move from.
         ParsedSimaiFile(ParsedSimaiFile&& other) noexcept
-            : SimaiFileView(other), m_result(other.m_result)
+            : m_result(std::exchange(other.m_result, Core::UnmanagedSimaiParseResult{}))
         {
-            other.Release();
         }
 
-        /// Frees the native memory of this object and takes the memory of another object.
+        /// Frees the native memory of this object and takes the memory of another object, which becomes empty.
         /// @param other The object to move from.
         /// @return This object.
         ParsedSimaiFile& operator=(ParsedSimaiFile&& other) noexcept
         {
             if (this != &other)
             {
-                Core::MajSimai_Free(&m_result);
-                SimaiFileView::operator=(other);
-                m_result = other.m_result;
-                other.Release();
+                Reset();
+                m_result = std::exchange(other.m_result, Core::UnmanagedSimaiParseResult{});
             }
 
             return *this;
         }
 
-    private:
-        /// Forgets the native memory after it was moved to another object.
-        void Release() noexcept
+        /// Gets whether the object owns a parsed file.
+        /// @return false for an empty object: default-constructed or moved from.
+        explicit operator bool() const noexcept
         {
-            SimaiFileView::operator=(SimaiFileView(nullptr));
+            return m_result.simaiFile != nullptr;
+        }
+
+        /// Gets a view of the parsed file, valid while this object owns it.
+        /// @return The view.
+        /// @throws std::logic_error when the object is empty.
+        SimaiFileView GetFile() const&
+        {
+            if (m_result.simaiFile == nullptr)
+            {
+                throw std::logic_error("The ParsedSimaiFile is empty: it was moved from or default-constructed.");
+            }
+
+            return SimaiFileView(m_result.simaiFile);
+        }
+
+        /// Not available on a temporary: the view would read memory that is freed at the end of the expression.
+        /// Keep the ParsedSimaiFile in a variable, or call ToModel().
+        SimaiFileView GetFile() const&& = delete;
+
+        /// Copies the parsed file into owned data.
+        /// @return The copy, which does not depend on this object.
+        /// @throws std::logic_error when the object is empty.
+        SimaiFile ToModel() const
+        {
+            return GetFile().ToModel();
+        }
+
+    private:
+        friend class SimaiParser;
+
+        /// Takes ownership of a native result and empties the source, so only this object frees it.
+        /// @param result The result written by MajSimai_ParseWithTolerance.
+        explicit ParsedSimaiFile(Core::UnmanagedSimaiParseResult& result) noexcept
+            : m_result(std::exchange(result, Core::UnmanagedSimaiParseResult{}))
+        {
+        }
+
+        /// Gets whether the native result failed.
+        /// @return true when it has an error code or no file.
+        bool HasFailed() const noexcept
+        {
+            return m_result.code != Core::UnmanagedSimaiParseResult::CODE_NO_ERROR || m_result.simaiFile == nullptr;
+        }
+
+        /// Copies the error of a failed native result into an exception.
+        /// @return The exception.
+        SimaiParseException CreateException() const
+        {
+            std::string message(Core::MakeView(m_result.errorMsg, m_result.errorMsgLen));
+            if (message.empty())
+            {
+                message = "MajSimai_ParseWithTolerance failed without a message.";
+            }
+
+            return SimaiParseException(static_cast<SimaiParseErrorCode>(m_result.code),
+                                       message,
+                                       m_result.errorAtLine,
+                                       m_result.errorAtColumn,
+                                       std::string(Core::MakeView(m_result.errorContent, m_result.errorContentLen)));
+        }
+
+        /// Frees the native memory, if any, and leaves the object empty.
+        void Reset() noexcept
+        {
+            if (m_result.simaiFile != nullptr || m_result.errorMsg != nullptr || m_result.errorContent != nullptr)
+            {
+                Core::MajSimai_Free(&m_result);
+            }
             m_result = Core::UnmanagedSimaiParseResult{};
         }
 
-        Core::UnmanagedSimaiParseResult m_result;
+        Core::UnmanagedSimaiParseResult m_result{};
     };
 
     /// Parses simai files with MajSimai.
     class SimaiParser
     {
     public:
-        /// Parses a simai file in lenient mode and copies the result into owned data.
+        /// Parses a simai file and copies the result into owned data.
         /// @param content The file as UTF-8; a UTF-8 or UTF-16 byte order mark is honored.
+        /// @param tolerance Lenient (the default) keeps a chart that breaks the grammar with its text but without
+        /// notes; strict fails on the first such chart.
         /// @return The parsed file.
         /// @throws SimaiParseException when MajSimai cannot parse the content.
         /// @throws std::length_error when the content is 2 GiB or larger.
-        static SimaiFile Parse(std::string_view content)
+        static SimaiFile Parse(std::string_view content, SimaiSyntaxTolerance tolerance = SimaiSyntaxTolerance::Lenient)
         {
-            return ParseAsView(content).ToModel();
+            return ParseAsView(content, tolerance).ToModel();
         }
 
-        /// Parses a simai file in lenient mode and keeps the result in native memory, which avoids copying it.
+        /// Parses a simai file and keeps the result in native memory, which avoids copying it.
         /// @param content The file as UTF-8; a UTF-8 or UTF-16 byte order mark is honored.
-        /// @return The parsed file.
+        /// @param tolerance Lenient (the default) keeps a chart that breaks the grammar with its text but without
+        /// notes; strict fails on the first such chart.
+        /// @return The owner of the parsed file.
         /// @throws SimaiParseException when MajSimai cannot parse the content.
         /// @throws std::length_error when the content is 2 GiB or larger.
-        static ParsedSimaiFile ParseAsView(std::string_view content)
+        static ParsedSimaiFile ParseAsView(std::string_view content, SimaiSyntaxTolerance tolerance = SimaiSyntaxTolerance::Lenient)
         {
             if (content.size() > static_cast<std::size_t>(std::numeric_limits<int32_t>::max()))
             {
                 throw std::length_error("MajSimai cannot parse content of 2 GiB or larger.");
             }
             Core::UnmanagedSimaiParseResult result{};
-            Core::MajSimai_Parse(content.data(), static_cast<int32_t>(content.size()), &result);
-            if (result.code != Core::UnmanagedSimaiParseResult::CODE_NO_ERROR || result.simaiFile == nullptr)
+            Core::MajSimai_ParseWithTolerance(content.data(), static_cast<int32_t>(content.size()), tolerance, &result);
+            // From here on the result is owned by `parsed`, which frees it even if building the error throws.
+            ParsedSimaiFile parsed(result);
+            if (parsed.HasFailed())
             {
-                ThrowAndFree(result);
+                throw parsed.CreateException();
             }
 
-            return ParsedSimaiFile(result);
-        }
-
-    private:
-        /// Throws the error of a failed parse result after freeing it.
-        /// @param result The failed result.
-        [[noreturn]] static void ThrowAndFree(Core::UnmanagedSimaiParseResult& result)
-        {
-            std::string message(Core::MakeView(result.errorMsg, result.errorMsgLen));
-            if (message.empty())
-            {
-                message = "MajSimai_Parse failed without a message.";
-            }
-            SimaiParseException exception(static_cast<SimaiParseErrorCode>(result.code),
-                                          message,
-                                          result.errorAtLine,
-                                          result.errorAtColumn,
-                                          std::string(Core::MakeView(result.errorContent, result.errorContentLen)));
-            Core::MajSimai_Free(&result);
-            throw exception;
+            return parsed;
         }
     };
 }

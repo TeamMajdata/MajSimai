@@ -12,7 +12,8 @@
 
 namespace MajSimai
 {
-    /// An owned copy of a Core::UnmanagedSimaiNote. The native layout of a SimaiNote.
+    /// An owned copy of a Core::UnmanagedSimaiNote. The native layout of a SimaiNote. Its pointers belong to the parse
+    /// result that holds it and are freed by MajSimai_Free.
     struct SimaiNote
     {
         /// The kind of the note.
@@ -56,7 +57,8 @@ namespace MajSimai
         std::vector<int32_t> relatedNotes;
     };
 
-    /// An owned copy of a Core::UnmanagedSimaiTimingPoint. The native layout of a SimaiTimingPoint.
+    /// An owned copy of a Core::UnmanagedSimaiTimingPoint. The native layout of a SimaiTimingPoint. Its pointers belong
+    /// to the parse result that holds it and are freed by MajSimai_Free.
     struct SimaiTimingPoint
     {
         /// The time in seconds from the start of the chart.
@@ -81,7 +83,8 @@ namespace MajSimai
         std::string rawContent;
     };
 
-    /// An owned copy of a Core::UnmanagedSimaiChart. The native layout of a SimaiChart.
+    /// An owned copy of a Core::UnmanagedSimaiChart. The native layout of a SimaiChart. Its pointers belong to the
+    /// parse result that holds it and are freed by MajSimai_Free.
     struct SimaiChart
     {
         /// Whether the chart has no note timing points.
@@ -98,7 +101,8 @@ namespace MajSimai
         std::vector<SimaiTimingPoint> commaTimings;
     };
 
-    /// An owned copy of a Core::UnmanagedSimaiCommand. The native layout of a SimaiCommand.
+    /// An owned copy of a Core::UnmanagedSimaiCommand. The native layout of a SimaiCommand. Its pointers belong to the
+    /// parse result that holds it and are freed by MajSimai_Free.
     struct SimaiCommand
     {
         /// The field name, without the &.
@@ -107,7 +111,8 @@ namespace MajSimai
         std::string value;
     };
 
-    /// An owned copy of a Core::UnmanagedSimaiFile. The native layout of a SimaiFile.
+    /// An owned copy of a Core::UnmanagedSimaiFile. The native layout of a SimaiFile. Its pointers belong to the parse
+    /// result that holds it and are freed by MajSimai_Free.
     struct SimaiFile
     {
         /// The &first offset in seconds.

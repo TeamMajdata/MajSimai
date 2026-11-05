@@ -17,7 +17,8 @@ namespace MajSimai.CppGen.Abi;
 /// parameter and field to the structs and enums they use. Pointer fields must say what they point to with
 /// <see cref="NativeStringAttribute"/>, <see cref="NativeArrayAttribute"/> or <see cref="NativePointeeAttribute"/>.
 /// The layout of every struct is measured from the runtime and checked against the layout a C++ compiler gives the
-/// generated declaration.
+/// generated declaration. Pointer fields are declared as pointers to <c>const</c>: the memory belongs to MajSimai and is
+/// only read in C++.
 /// </remarks>
 internal sealed class AbiReader
 {
@@ -198,7 +199,7 @@ internal sealed class AbiReader
         var needsDisabledMarshalling = types.Any(t => t == AbiPrimitiveType.Bool || t == AbiPrimitiveType.Char16);
         if (needsDisabledMarshalling && method.Module.Assembly.GetCustomAttribute<DisableRuntimeMarshallingAttribute>() is null)
         {
-            throw new CppGenException($"{method.DeclaringType!.Name}.{method.Name} passes bool or char, which the runtime only allows in an [UnmanagedCallersOnly] signature when the assembly has [assembly: DisableRuntimeMarshalling].");
+            throw new CppGenException($"{method.DeclaringType!.Name}.{method.Name} passes bool or char, which are not blittable: the runtime rejects them in an [UnmanagedCallersOnly] signature unless the assembly has [assembly: DisableRuntimeMarshalling]. Use int instead.");
         }
     }
 
@@ -363,7 +364,7 @@ internal sealed class AbiReader
             }
             kind = AbiFieldKind.String;
             lengthName = text.LengthName;
-            abiType = new AbiPointerType(AbiPrimitiveType.Utf8Char);
+            abiType = new AbiPointerType(AbiPrimitiveType.Utf8Char, IsConst: true);
         }
         else if (array is not null)
         {
@@ -373,7 +374,7 @@ internal sealed class AbiReader
             }
             kind = AbiFieldKind.Array;
             lengthName = array.LengthName;
-            abiType = new AbiPointerType(ReadPointee(type.GetElementType()!, location));
+            abiType = new AbiPointerType(ReadPointee(type.GetElementType()!, location), IsConst: true);
         }
         else if (pointee is not null)
         {
@@ -386,7 +387,7 @@ internal sealed class AbiReader
                 throw new CppGenException($"{location} points to a single struct; only handle structs (taken by pointer by an exported function) support [NativePointee].");
             }
             kind = AbiFieldKind.Pointer;
-            abiType = new AbiPointerType(new AbiStructType(ReadStruct(pointee.Type)));
+            abiType = new AbiPointerType(new AbiStructType(ReadStruct(pointee.Type)), IsConst: true);
         }
         else if (type.IsPointer)
         {

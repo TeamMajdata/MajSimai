@@ -26,7 +26,7 @@ public sealed unsafe class AbiReaderTests
     {
         var model = s_majSimai.Value;
 
-        Assert.Equal(new[] { "MajSimai_Parse", "MajSimai_Free", "MajSimai_FreeHGlobal" }, model.Functions.Select(f => f.EntryPoint));
+        Assert.Equal(new[] { "MajSimai_Parse", "MajSimai_ParseWithTolerance", "MajSimai_Free", "MajSimai_FreeHGlobal" }, model.Functions.Select(f => f.EntryPoint));
         Assert.All(model.Functions, f => Assert.Equal("cdecl", f.CallingConvention));
         var parse = model.FindFunction("MajSimai_Parse")!;
         Assert.Equal(new[] { "const char*", "int32_t", "UnmanagedSimaiParseResult*" }, parse.Parameters.Select(p => p.Type.CppName));
@@ -34,7 +34,10 @@ public sealed unsafe class AbiReaderTests
         Assert.Equal("void", parse.ReturnType.CppName);
         Assert.StartsWith("Parses a simai file in lenient mode.", parse.Doc.Summary);
         Assert.Equal("The length of the file in bytes.", parse.Doc.GetParameter("contentLength"));
-        Assert.Equal("bool", model.FindFunction("MajSimai_Free")!.ReturnType.CppName);
+        var parseWithTolerance = model.FindFunction("MajSimai_ParseWithTolerance")!;
+        Assert.Equal(new[] { "const char*", "int32_t", "SimaiSyntaxTolerance", "UnmanagedSimaiParseResult*" }, parseWithTolerance.Parameters.Select(p => p.Type.CppName));
+        Assert.Equal("int32_t", model.FindFunction("MajSimai_Free")!.ReturnType.CppName);
+        Assert.Equal("int32_t", model.FindFunction("MajSimai_FreeHGlobal")!.ReturnType.CppName);
         Assert.Equal("intptr_t", model.FindFunction("MajSimai_FreeHGlobal")!.Parameters[0].Type.CppName);
     }
 
@@ -49,7 +52,8 @@ public sealed unsafe class AbiReaderTests
         Assert.Equal(new[] { "UnmanagedSimaiNote", "UnmanagedSimaiTimingPoint", "UnmanagedSimaiChart", "UnmanagedSimaiCommand", "UnmanagedSimaiFile", "UnmanagedSimaiParseResult" },
                      model.Structs.Select(s => s.Name));
         Assert.Equal(new[] { "UnmanagedSimaiParseResult" }, model.Structs.Where(s => s.IsHandle).Select(s => s.Name));
-        Assert.Equal(new[] { "SimaiNoteType" }, model.Enums.Select(e => e.Name));
+        Assert.Equal(new[] { "SimaiNoteType", "SimaiSyntaxTolerance" }, model.Enums.Select(e => e.Name));
+        Assert.Equal(new[] { "Lenient", "Strict" }, model.Enums[1].Members.Select(m => m.Name));
         Assert.Equal(new[] { "Tap", "Slide", "Hold", "Touch", "TouchHold" }, model.Enums[0].Members.Select(m => m.Name));
         Assert.Equal(new[] { "0", "1", "2", "3", "4" }, model.Enums[0].Members.Select(m => m.Value));
         Assert.Equal("int32_t", model.Enums[0].UnderlyingType.CppName);
@@ -70,7 +74,8 @@ public sealed unsafe class AbiReaderTests
         Assert.Equal("int32_t", note.FindField("relatedNotes")!.ElementType.CppName);
         Assert.Equal("char16_t", note.FindField("touchArea")!.Type.CppName);
         Assert.Equal("SimaiNoteType", note.FindField("type")!.Type.CppName);
-        Assert.Equal("char*", note.FindField("rawContent")!.Type.CppName);
+        Assert.Equal("const char*", note.FindField("rawContent")!.Type.CppName);
+        Assert.Equal("const int32_t*", note.FindField("relatedNotes")!.Type.CppName);
         Assert.DoesNotContain(note.DataFields, f => f.Name.EndsWith("Len", StringComparison.Ordinal));
         Assert.Equal("The touch area letter, or a space.", note.FindField("touchArea")!.Doc.Summary);
     }
@@ -107,10 +112,10 @@ public sealed unsafe class AbiReaderTests
         var file = result.FindField("simaiFile")!;
 
         Assert.Equal(AbiFieldKind.Pointer, file.Kind);
-        Assert.Equal("UnmanagedSimaiFile*", file.Type.CppName);
-        Assert.Equal(new[] { "CODE_NO_ERROR", "CODE_INVALID_CONTENT", "CODE_INTERNAL_ERROR", "CODE_INVALID_SIMAI_MARKUP", "CODE_INVALID_SIMAI_SYNTAX" },
+        Assert.Equal("const UnmanagedSimaiFile*", file.Type.CppName);
+        Assert.Equal(new[] { "CODE_NO_ERROR", "CODE_INVALID_CONTENT", "CODE_INTERNAL_ERROR", "CODE_INVALID_SIMAI_MARKUP", "CODE_INVALID_SIMAI_SYNTAX", "CODE_INVALID_ARGUMENT" },
                      result.Constants.Select(c => c.Name));
-        Assert.Equal("4", result.Constants[^1].Value);
+        Assert.Equal("5", result.Constants[^1].Value);
     }
 
     /// <summary>
@@ -129,7 +134,7 @@ public sealed unsafe class AbiReaderTests
         Assert.Equal(new[] { "1ll", "5000000000ll" }, model.Enums.Single().Members.Select(m => m.Value));
         Assert.Equal(new[] { AbiFieldKind.Value, AbiFieldKind.Value, AbiFieldKind.Length, AbiFieldKind.Array, AbiFieldKind.Pointer },
                      handle.Fields.Select(f => f.Kind));
-        Assert.Equal("UnmanagedItem*", handle.FindField("first")!.Type.CppName);
+        Assert.Equal("const UnmanagedItem*", handle.FindField("first")!.Type.CppName);
         Assert.Equal(new[] { 0, 8, 12, 16, 24 }, handle.Fields.Select(f => f.Offset));
         Assert.Equal(32, handle.Size);
     }
@@ -164,7 +169,7 @@ public sealed unsafe class AbiReaderTests
     {
         var exports = AbiReader.FindExports(typeof(UnmanagedSimaiParser).Assembly);
 
-        Assert.Equal(new[] { "Parse", "Free", "Free" }, exports.Select(m => m.Name));
+        Assert.Equal(new[] { "Parse", "ParseWithTolerance", "Free", "Free" }, exports.Select(m => m.Name));
     }
 
     /// <summary>

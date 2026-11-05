@@ -6,10 +6,15 @@ using System.Text;
 namespace MajSimai.Unmanaged;
 
 /// <summary>
-/// Copies parsed results into native memory. Every pointer is allocated with <see cref="Marshal.AllocHGlobal(int)"/> and
-/// is freed by the <c>Free</c> method of the native struct that owns it. Texts are copied as UTF-8, and their lengths
-/// are counted in bytes.
+/// Copies parsed results into native memory. Every pointer is allocated with <see cref="Marshal.AllocHGlobal(int)"/>
+/// and is freed by the <c>Free</c> method of the native struct that owns it. Texts are copied as UTF-8, and their
+/// lengths are counted in bytes.
 /// </summary>
+/// <remarks>
+/// A copy that fails partway, for example when memory runs out, frees what it already allocated before rethrowing. To
+/// make that possible, an array is allocated zeroed and stored in its owner with its length before it is filled: the
+/// <c>Free</c> methods skip null pointers, so freeing the owner releases the items copied so far and nothing else.
+/// </remarks>
 internal static unsafe class UnmanagedConverter
 {
     /// <summary>
@@ -19,31 +24,34 @@ internal static unsafe class UnmanagedConverter
     /// <returns>The native file.</returns>
     public static UnmanagedSimaiFile ToUnmanaged(SimaiFile file)
     {
-        var charts = file.Charts;
-        var chartArray = Allocate<UnmanagedSimaiChart>(charts.Length);
-        for (var i = 0; i < charts.Length; i++)
+        var native = new UnmanagedSimaiFile { offset = file.Offset };
+        try
         {
-            chartArray[i] = ToUnmanaged(charts[i] ?? SimaiChart.Empty);
-        }
-        var commands = file.Commands;
-        var commandArray = Allocate<UnmanagedSimaiCommand>(commands.Count);
-        for (var i = 0; i < commands.Count; i++)
-        {
-            commandArray[i] = ToUnmanaged(commands[i]);
-        }
-        var native = new UnmanagedSimaiFile
-        {
-            offset = file.Offset,
-            charts = chartArray,
-            chartsLen = charts.Length,
-            commands = commandArray,
-            commandsLen = commands.Count,
-        };
-        native.title = ToUtf8(file.Title, out native.titleLen);
-        native.artist = ToUtf8(file.Artist, out native.artistLen);
-        native.finalDesigner = ToUtf8(file.FinalDesigner, out native.finalDesignerLen);
+            native.title = ToUtf8(file.Title, out native.titleLen);
+            native.artist = ToUtf8(file.Artist, out native.artistLen);
+            native.finalDesigner = ToUtf8(file.FinalDesigner, out native.finalDesignerLen);
+            var charts = file.Charts;
+            native.charts = AllocateZeroed<UnmanagedSimaiChart>(charts.Length);
+            native.chartsLen = charts.Length;
+            for (var i = 0; i < charts.Length; i++)
+            {
+                native.charts[i] = ToUnmanaged(charts[i] ?? SimaiChart.Empty);
+            }
+            var commands = file.Commands;
+            native.commands = AllocateZeroed<UnmanagedSimaiCommand>(commands.Count);
+            native.commandsLen = commands.Count;
+            for (var i = 0; i < commands.Count; i++)
+            {
+                native.commands[i] = ToUnmanaged(commands[i]);
+            }
 
-        return native;
+            return native;
+        }
+        catch
+        {
+            native.Free();
+            throw;
+        }
     }
 
     /// <summary>
@@ -53,19 +61,27 @@ internal static unsafe class UnmanagedConverter
     /// <returns>The native chart.</returns>
     public static UnmanagedSimaiChart ToUnmanaged(SimaiChart chart)
     {
-        var native = new UnmanagedSimaiChart
+        var native = new UnmanagedSimaiChart();
+        try
         {
-            isEmpty = chart.IsEmpty,
-            noteTimings = ToUnmanaged(chart.NoteTimings),
-            noteTimingsLen = chart.NoteTimings.Length,
-            commaTimings = ToUnmanaged(chart.CommaTimings),
-            commaTimingsLen = chart.CommaTimings.Length,
-        };
-        native.level = ToUtf8(chart.Level, out native.levelLen);
-        native.designer = ToUtf8(chart.Designer, out native.designerLen);
-        native.fumen = ToUtf8(chart.Fumen, out native.fumenLen);
+            native.level = ToUtf8(chart.Level, out native.levelLen);
+            native.designer = ToUtf8(chart.Designer, out native.designerLen);
+            native.fumen = ToUtf8(chart.Fumen, out native.fumenLen);
+            native.noteTimings = AllocateZeroed<UnmanagedSimaiTimingPoint>(chart.NoteTimings.Length);
+            native.noteTimingsLen = chart.NoteTimings.Length;
+            CopyTimings(chart.NoteTimings, native.noteTimings);
+            native.commaTimings = AllocateZeroed<UnmanagedSimaiTimingPoint>(chart.CommaTimings.Length);
+            native.commaTimingsLen = chart.CommaTimings.Length;
+            CopyTimings(chart.CommaTimings, native.commaTimings);
+            native.isEmpty = chart.IsEmpty;
 
-        return native;
+            return native;
+        }
+        catch
+        {
+            native.Free();
+            throw;
+        }
     }
 
     /// <summary>
@@ -76,10 +92,18 @@ internal static unsafe class UnmanagedConverter
     public static UnmanagedSimaiCommand ToUnmanaged(SimaiCommand command)
     {
         var native = new UnmanagedSimaiCommand();
-        native.prefix = ToUtf8(command.Prefix, out native.prefixLen);
-        native.value = ToUtf8(command.Value, out native.valueLen);
+        try
+        {
+            native.prefix = ToUtf8(command.Prefix, out native.prefixLen);
+            native.value = ToUtf8(command.Value, out native.valueLen);
 
-        return native;
+            return native;
+        }
+        catch
+        {
+            native.Free();
+            throw;
+        }
     }
 
     /// <summary>
@@ -89,12 +113,6 @@ internal static unsafe class UnmanagedConverter
     /// <returns>The native timing point.</returns>
     public static UnmanagedSimaiTimingPoint ToUnmanaged(SimaiTimingPoint timing)
     {
-        var notes = timing.Notes;
-        var noteArray = Allocate<UnmanagedSimaiNote>(notes.Length);
-        for (var i = 0; i < notes.Length; i++)
-        {
-            noteArray[i] = ToUnmanaged(notes[i], notes);
-        }
         var native = new UnmanagedSimaiTimingPoint
         {
             timing = timing.Timing,
@@ -105,12 +123,25 @@ internal static unsafe class UnmanagedConverter
             rawTextPositionY = timing.RawTextPositionY,
             rawTextPosition = timing.RawTextPosition,
             isEmpty = timing.IsEmpty,
-            notes = noteArray,
-            notesLen = notes.Length,
         };
-        native.rawContent = ToUtf8(timing.RawContent, out native.rawContentLen);
+        try
+        {
+            native.rawContent = ToUtf8(timing.RawContent, out native.rawContentLen);
+            var notes = timing.Notes;
+            native.notes = AllocateZeroed<UnmanagedSimaiNote>(notes.Length);
+            native.notesLen = notes.Length;
+            for (var i = 0; i < notes.Length; i++)
+            {
+                native.notes[i] = ToUnmanaged(notes[i], notes);
+            }
 
-        return native;
+            return native;
+        }
+        catch
+        {
+            native.Free();
+            throw;
+        }
     }
 
     /// <summary>
@@ -121,12 +152,6 @@ internal static unsafe class UnmanagedConverter
     /// <returns>The native note; a related note that is not in <paramref name="siblings"/> has the index -1.</returns>
     public static UnmanagedSimaiNote ToUnmanaged(SimaiNote note, SimaiNote[] siblings)
     {
-        var related = note.RelatedNotes;
-        var relatedArray = Allocate<int>(related.Length);
-        for (var i = 0; i < related.Length; i++)
-        {
-            relatedArray[i] = Array.IndexOf(siblings, related[i]);
-        }
         var native = new UnmanagedSimaiNote
         {
             type = note.Type,
@@ -146,12 +171,25 @@ internal static unsafe class UnmanagedConverter
             isEach = note.IsEach,
             isStar = note.IsStar,
             isStarDouble = note.IsStarDouble,
-            relatedNotes = relatedArray,
-            relatedNotesLen = related.Length,
         };
-        native.rawContent = ToUtf8(note.RawContent, out native.rawContentLen);
+        try
+        {
+            native.rawContent = ToUtf8(note.RawContent, out native.rawContentLen);
+            var related = note.RelatedNotes;
+            native.relatedNotes = AllocateZeroed<int>(related.Length);
+            native.relatedNotesLen = related.Length;
+            for (var i = 0; i < related.Length; i++)
+            {
+                native.relatedNotes[i] = Array.IndexOf(siblings, related[i]);
+            }
 
-        return native;
+            return native;
+        }
+        catch
+        {
+            native.Free();
+            throw;
+        }
     }
 
     /// <summary>
@@ -162,49 +200,51 @@ internal static unsafe class UnmanagedConverter
     /// <returns>The native text, or <see langword="null"/> when <paramref name="value"/> is null or empty.</returns>
     public static byte* ToUtf8(string? value, out int length)
     {
+        length = 0;
         if (string.IsNullOrEmpty(value))
         {
-            length = 0;
             return null;
         }
-        length = Encoding.UTF8.GetByteCount(value);
-        var buffer = (byte*)Marshal.AllocHGlobal(length + 1);
-        Encoding.UTF8.GetBytes(value, new Span<byte>(buffer, length));
-        buffer[length] = 0;
+        var byteCount = Encoding.UTF8.GetByteCount(value);
+        var buffer = (byte*)Marshal.AllocHGlobal(byteCount + 1);
+        Encoding.UTF8.GetBytes(value, new Span<byte>(buffer, byteCount));
+        buffer[byteCount] = 0;
+        length = byteCount;
 
         return buffer;
     }
 
     /// <summary>
-    /// Copies timing points.
-    /// </summary>
-    /// <param name="timings">The timing points.</param>
-    /// <returns>The native array, or null when there are none.</returns>
-    private static UnmanagedSimaiTimingPoint* ToUnmanaged(ReadOnlySpan<SimaiTimingPoint> timings)
-    {
-        var array = Allocate<UnmanagedSimaiTimingPoint>(timings.Length);
-        for (var i = 0; i < timings.Length; i++)
-        {
-            array[i] = ToUnmanaged(timings[i]);
-        }
-
-        return array;
-    }
-
-    /// <summary>
-    /// Allocates native memory for <paramref name="length"/> items, or returns <see langword="null"/> for none.
+    /// Allocates native memory for <paramref name="length"/> items and fills it with zeros, or returns
+    /// <see langword="null"/> for none.
     /// </summary>
     /// <typeparam name="T">The type of the items.</typeparam>
     /// <param name="length">The number of items.</param>
     /// <returns>The native memory, or <see langword="null"/>.</returns>
-    private static T* Allocate<T>(int length) where T : unmanaged
+    internal static T* AllocateZeroed<T>(int length) where T : unmanaged
     {
         if (length == 0)
         {
             return null;
         }
+        var size = checked(sizeof(T) * length);
+        var memory = (T*)Marshal.AllocHGlobal(size);
+        new Span<byte>(memory, size).Clear();
 
-        return (T*)Marshal.AllocHGlobal(sizeof(T) * length);
+        return memory;
+    }
+
+    /// <summary>
+    /// Copies timing points into a zeroed native array.
+    /// </summary>
+    /// <param name="timings">The timing points.</param>
+    /// <param name="destination">The array, already stored in its owner with its length.</param>
+    private static void CopyTimings(ReadOnlySpan<SimaiTimingPoint> timings, UnmanagedSimaiTimingPoint* destination)
+    {
+        for (var i = 0; i < timings.Length; i++)
+        {
+            destination[i] = ToUnmanaged(timings[i]);
+        }
     }
 }
 #endif

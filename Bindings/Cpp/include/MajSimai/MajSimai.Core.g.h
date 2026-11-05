@@ -39,6 +39,19 @@ namespace MajSimai
         TouchHold = 4,
     };
 
+    /// How strictly SimaiParser follows the simai grammar.
+    enum class SimaiSyntaxTolerance : int32_t
+    {
+        /// Reads charts the way MajSimai always has: a note that cannot be read or is malformed is skipped, and text
+        /// whose meaning the grammar does not define (such as note text cut off by (120), or a last note without a
+        /// comma) is dropped; both are logged. Only declarations that are not closed or whose value cannot be read, and
+        /// a single |, still throw.
+        Lenient = 0,
+        /// Throws for every note that cannot be read and for every text whose meaning the grammar does not define. A
+        /// chart that fails makes the whole file fail.
+        Strict = 1,
+    };
+
     namespace Core
     {
         struct UnmanagedSimaiNote;
@@ -48,7 +61,8 @@ namespace MajSimai
         struct UnmanagedSimaiFile;
         struct UnmanagedSimaiParseResult;
 
-        /// The native layout of a SimaiNote.
+        /// The native layout of a SimaiNote. Its pointers belong to the parse result that holds it and are freed by
+        /// MajSimai_Free.
         struct UnmanagedSimaiNote
         {
             /// The kind of the note.
@@ -90,13 +104,14 @@ namespace MajSimai
             /// The number of items in relatedNotes.
             int32_t relatedNotesLen;
             /// The note text.
-            char* rawContent;
+            const char* rawContent;
             /// The indices, in the notes of the same timing point, of SimaiNote.RelatedNotes; -1 for a related note
             /// that is not in the timing point.
-            int32_t* relatedNotes;
+            const int32_t* relatedNotes;
         };
 
-        /// The native layout of a SimaiTimingPoint.
+        /// The native layout of a SimaiTimingPoint. Its pointers belong to the parse result that holds it and are freed
+        /// by MajSimai_Free.
         struct UnmanagedSimaiTimingPoint
         {
             /// The time in seconds from the start of the chart.
@@ -120,12 +135,13 @@ namespace MajSimai
             /// Whether the timing point has no notes.
             bool isEmpty;
             /// The notes.
-            UnmanagedSimaiNote* notes;
+            const UnmanagedSimaiNote* notes;
             /// The note text without whitespace.
-            char* rawContent;
+            const char* rawContent;
         };
 
-        /// The native layout of a SimaiChart.
+        /// The native layout of a SimaiChart. Its pointers belong to the parse result that holds it and are freed by
+        /// MajSimai_Free.
         struct UnmanagedSimaiChart
         {
             /// The length of level in bytes.
@@ -141,18 +157,19 @@ namespace MajSimai
             /// Whether the chart has no note timing points.
             bool isEmpty;
             /// The level text.
-            char* level;
+            const char* level;
             /// The designer of the chart.
-            char* designer;
+            const char* designer;
             /// The chart text.
-            char* fumen;
+            const char* fumen;
             /// The timing points that have notes.
-            UnmanagedSimaiTimingPoint* noteTimings;
+            const UnmanagedSimaiTimingPoint* noteTimings;
             /// The timing points of the commas.
-            UnmanagedSimaiTimingPoint* commaTimings;
+            const UnmanagedSimaiTimingPoint* commaTimings;
         };
 
-        /// The native layout of a SimaiCommand.
+        /// The native layout of a SimaiCommand. Its pointers belong to the parse result that holds it and are freed by
+        /// MajSimai_Free.
         struct UnmanagedSimaiCommand
         {
             /// The length of prefix in bytes.
@@ -160,12 +177,13 @@ namespace MajSimai
             /// The length of value in bytes.
             int32_t valueLen;
             /// The field name, without the &.
-            char* prefix;
+            const char* prefix;
             /// The field value.
-            char* value;
+            const char* value;
         };
 
-        /// The native layout of a SimaiFile.
+        /// The native layout of a SimaiFile. Its pointers belong to the parse result that holds it and are freed by
+        /// MajSimai_Free.
         struct UnmanagedSimaiFile
         {
             /// The length of title in bytes.
@@ -181,18 +199,21 @@ namespace MajSimai
             /// The number of items in commands.
             int32_t commandsLen;
             /// The song title.
-            char* title;
+            const char* title;
             /// The song artist.
-            char* artist;
+            const char* artist;
             /// The designer of the file.
-            char* finalDesigner;
+            const char* finalDesigner;
             /// The seven charts, &inote_1 to &inote_7.
-            UnmanagedSimaiChart* charts;
+            const UnmanagedSimaiChart* charts;
             /// The other fields of the file.
-            UnmanagedSimaiCommand* commands;
+            const UnmanagedSimaiCommand* commands;
         };
 
-        /// The result of MajSimai_Parse: a parsed file, or the error that stopped the parse.
+        /// The result of MajSimai_Parse and MajSimai_ParseWithTolerance: a parsed file, or the error that stopped the
+        /// parse. The caller owns the result and frees it with MajSimai_Free; all the memory it points to belongs to
+        /// it, so never free those pointers yourself, never keep them after MajSimai_Free, and never free two copies of
+        /// one result.
         struct UnmanagedSimaiParseResult
         {
             /// The file was parsed.
@@ -205,6 +226,8 @@ namespace MajSimai
             static constexpr int32_t CODE_INVALID_SIMAI_MARKUP = 3;
             /// The content has a malformed declaration, such as a BPM change that is not closed.
             static constexpr int32_t CODE_INVALID_SIMAI_SYNTAX = 4;
+            /// An argument other than the content is not valid, such as an unknown syntax tolerance.
+            static constexpr int32_t CODE_INVALID_ARGUMENT = 5;
 
             /// One of the CODE_ constants.
             int32_t code;
@@ -217,31 +240,50 @@ namespace MajSimai
             /// The length of errorContent in bytes.
             int32_t errorContentLen;
             /// The parsed file, or null when parsing failed.
-            UnmanagedSimaiFile* simaiFile;
+            const UnmanagedSimaiFile* simaiFile;
             /// The description of the error, or null when parsing succeeded.
-            char* errorMsg;
+            const char* errorMsg;
             /// The text the error is about, or null.
-            char* errorContent;
+            const char* errorContent;
         };
 
         extern "C"
         {
             /// Parses a simai file in lenient mode. The text is read as UTF-8 unless it starts with a byte order mark.
-            /// Free the result with MajSimai_Free, whether parsing succeeded or not.
             /// @param content The simai file.
             /// @param contentLength The length of the file in bytes.
-            /// @param result Receives the parsed file, or the error that stopped the parse.
+            /// @param result Receives the parsed file, or the error that stopped the parse. It is overwritten without
+            /// being freed, so it must not own memory: pass a zero-initialized result or one already freed with
+            /// MajSimai_Free.
             MAJSIMAI_API void MAJSIMAI_CDECL MajSimai_Parse(const char* content, int32_t contentLength, UnmanagedSimaiParseResult* result);
 
-            /// Frees a result returned by MajSimai_Parse and resets it.
-            /// @param ptr The result.
-            /// @return true when the result was freed; false when it is null.
-            MAJSIMAI_API bool MAJSIMAI_CDECL MajSimai_Free(UnmanagedSimaiParseResult* ptr);
+            /// Parses a simai file with the given syntax tolerance. The text is read as UTF-8 unless it starts with a
+            /// byte order mark. In strict mode the first chart that breaks the grammar fails the parse with
+            /// UnmanagedSimaiParseResult.CODE_INVALID_SIMAI_SYNTAX or
+            /// UnmanagedSimaiParseResult.CODE_INVALID_SIMAI_MARKUP; the line and column of the error are counted in the
+            /// text of that chart.
+            /// @param content The simai file.
+            /// @param contentLength The length of the file in bytes.
+            /// @param tolerance Lenient or strict; another value fails with
+            /// UnmanagedSimaiParseResult.CODE_INVALID_ARGUMENT.
+            /// @param result Receives the parsed file, or the error that stopped the parse. It is overwritten without
+            /// being freed, so it must not own memory: pass a zero-initialized result or one already freed with
+            /// MajSimai_Free.
+            MAJSIMAI_API void MAJSIMAI_CDECL MajSimai_ParseWithTolerance(const char* content, int32_t contentLength, SimaiSyntaxTolerance tolerance, UnmanagedSimaiParseResult* result);
 
-            /// Frees memory allocated by MajSimai with Marshal.AllocHGlobal.
+            /// Frees a result returned by MajSimai_Parse or MajSimai_ParseWithTolerance and resets it to an empty
+            /// result. Freeing a result that was already freed does nothing, but freeing two copies of one result frees
+            /// the same memory twice.
+            /// @param ptr The result.
+            /// @return 1 when the result was freed; 0 when ptr is null or freeing failed.
+            MAJSIMAI_API int32_t MAJSIMAI_CDECL MajSimai_Free(UnmanagedSimaiParseResult* ptr);
+
+            /// Frees one block of memory that MajSimai allocated with Marshal.AllocHGlobal and handed over to the
+            /// caller. No entry point hands memory over at the moment: everything a parse result points to belongs to
+            /// the result and is freed by MajSimai_Free, so never pass a pointer taken from a result.
             /// @param ptr The memory.
-            /// @return true when the memory was freed; false when it is null.
-            MAJSIMAI_API bool MAJSIMAI_CDECL MajSimai_FreeHGlobal(intptr_t ptr);
+            /// @return 1 when the memory was freed; 0 when ptr is null or freeing failed.
+            MAJSIMAI_API int32_t MAJSIMAI_CDECL MajSimai_FreeHGlobal(intptr_t ptr);
         }
 
         /// Gets native UTF-8 text as a view; null text or a length that is not positive gives an empty view.

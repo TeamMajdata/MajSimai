@@ -6,18 +6,19 @@ cmake_minimum_required(VERSION 3.15)
 
 project(MajSimaiCpp VERSION 3.0.0 LANGUAGES CXX)
 
-# The wrapper is header-only. Link the native library with MAJSIMAI_NATIVE_LIBRARY, or link it yourself.
 add_library(MajSimaiCpp INTERFACE)
 add_library(MajSimai::MajSimaiCpp ALIAS MajSimaiCpp)
 target_include_directories(MajSimaiCpp INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}/include")
 target_compile_features(MajSimaiCpp INTERFACE cxx_std_17)
 
+# Link the native library with MAJSIMAI_NATIVE_LIBRARY, or link it yourself. tools/build-cpp-package.py makes a
+# package that links its own shared or static library instead.
 set(MAJSIMAI_NATIVE_LIBRARY "" CACHE FILEPATH
     "MajSimai published with native AOT: the import library MajSimai.lib on Windows, MajSimai.so on Linux or MajSimai.dylib on macOS.")
 if(MAJSIMAI_NATIVE_LIBRARY)
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR CMAKE_SYSTEM_NAME STREQUAL "Android")
-        # MajSimai.so has no soname and no lib prefix, so link it by its file name; the program then finds it
-        # through its rpath or LD_LIBRARY_PATH instead of the absolute path it was linked from.
+        # A MajSimai.so published without a soname would be recorded with the absolute path it was linked from,
+        # so link it by its file name; the program then finds it through its rpath or LD_LIBRARY_PATH.
         get_filename_component(MAJSIMAI_NATIVE_DIRECTORY "${MAJSIMAI_NATIVE_LIBRARY}" DIRECTORY)
         get_filename_component(MAJSIMAI_NATIVE_NAME "${MAJSIMAI_NATIVE_LIBRARY}" NAME)
         target_link_directories(MajSimaiCpp INTERFACE "${MAJSIMAI_NATIVE_DIRECTORY}")

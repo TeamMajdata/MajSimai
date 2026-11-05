@@ -35,10 +35,12 @@ internal static class Program
     private const string Usage = """
         Generates the C++ wrapper of MajSimai from its native ABI (Runtime/Unmanaged).
 
-        Usage: dotnet run --project tools/MajSimai.CppGen -- [--output <directory>] [--check]
+        Usage: dotnet run --project tools/MajSimai.CppGen -- [--output <directory>] [--native-manifest <file>] [--check]
 
-          --output <directory>  Where to write the wrapper. Default: Bindings/Cpp in the repository.
-          --check               Write nothing; exit with 1 when a file is missing, different or stale.
+          --output <directory>       Where to write the wrapper. Default: Bindings/Cpp in the repository.
+          --native-manifest <file>   The MajSimaiNative.json of a package made by tools/build-cpp-package.py; the
+                                     CMake file then links the shared or static library it describes.
+          --check                    Write nothing; exit with 1 when a file is missing, different or stale.
         """;
 
     /// <summary>
@@ -61,6 +63,7 @@ internal static class Program
     internal static int Run(string[] args, TextWriter output, TextWriter error)
     {
         string? outputDirectory = null;
+        string? manifest = null;
         var check = false;
         for (var i = 0; i < args.Length; i++)
         {
@@ -68,6 +71,9 @@ internal static class Program
             {
                 case "--output" when i + 1 < args.Length:
                     outputDirectory = args[++i];
+                    break;
+                case "--native-manifest" when i + 1 < args.Length:
+                    manifest = args[++i];
                     break;
                 case "--check":
                     check = true;
@@ -84,7 +90,8 @@ internal static class Program
         try
         {
             outputDirectory ??= FindDefaultOutput(Directory.GetCurrentDirectory());
-            var files = CppBindingGenerator.Generate(CppBindingGenerator.ReadMajSimai());
+            var package = manifest is null ? null : NativePackage.Load(manifest);
+            var files = CppBindingGenerator.Generate(CppBindingGenerator.ReadMajSimai(), package);
 
             return check ? Check(outputDirectory, files, output, error) : Write(outputDirectory, files, output);
         }

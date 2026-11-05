@@ -1,0 +1,31 @@
+<Project>
+
+  <!--
+    Imported by tools/build-cpp-package.py through CustomAfterMicrosoftCommonTargets when it publishes MajSimai with
+    native AOT. Normal builds and publishes do not import it.
+  -->
+
+  <!--
+    Give the Linux shared library a soname. Without one, a program linked to MajSimai.so records the path it was linked
+    from instead of the file name, and cannot find the library once that path changes.
+  -->
+  <ItemGroup Condition="'$(PublishAot)' == 'true' and '$(NativeLib)' == 'Shared' and $(RuntimeIdentifier.StartsWith('linux'))">
+    <LinkerArg Include="-Wl,-soname,$(TargetName).so" />
+  </ItemGroup>
+
+  <!--
+    Write what a program needs to link the library to $(MajSimaiLinkItemsFile), one "kind=value" line each: the native
+    binary, then the native AOT runtime libraries and the system libraries in link order.
+  -->
+  <Target Name="MajSimaiWriteNativeLinkItems" AfterTargets="LinkNative" Condition="'$(MajSimaiLinkItemsFile)' != ''">
+    <ItemGroup>
+      <_MajSimaiLinkItem Include="binary=$([MSBuild]::NormalizePath('$(MSBuildProjectDirectory)', '$(NativeBinary)'))" />
+      <_MajSimaiLinkItem Include="@(NativeLibrary->'library=%(FullPath)')" />
+      <_MajSimaiLinkItem Include="@(NativeSystemLibrary->'system=%(Identity)')" />
+      <_MajSimaiLinkItem Include="@(SdkNativeLibrary->'system=%(Identity)')" />
+      <_MajSimaiLinkItem Include="@(NativeFramework->'framework=%(Identity)')" />
+    </ItemGroup>
+    <WriteLinesToFile File="$(MajSimaiLinkItemsFile)" Lines="@(_MajSimaiLinkItem)" Overwrite="true" />
+  </Target>
+
+</Project>

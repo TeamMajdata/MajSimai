@@ -42,11 +42,14 @@ internal static class NativeDump
     /// Writes the record of a parse error.
     /// </summary>
     /// <param name="code">The error code.</param>
+    /// <param name="line">The line of the error, or -1.</param>
+    /// <param name="column">The column of the error, or -1.</param>
     /// <param name="message">The error message.</param>
+    /// <param name="content">The text the error is about, or an empty string.</param>
     /// <returns>The record.</returns>
-    public static string WriteError(int code, string message)
+    public static string WriteError(int code, int line, int column, string message, string content)
     {
-        return $"error code={code} line=-1 column=-1 message={Escape(message)} content=\n";
+        return $"error code={code} line={line} column={column} message={Escape(message)} content={Escape(content)}\n";
     }
 
     /// <summary>

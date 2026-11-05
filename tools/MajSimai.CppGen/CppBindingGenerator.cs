@@ -32,9 +32,13 @@ internal static class CppBindingGenerator
     /// Generates the files of the wrapper.
     /// </summary>
     /// <param name="model">The native ABI.</param>
+    /// <param name="package">
+    /// The native build the wrapper is packaged with, which the CMake file then links; <see langword="null"/> for the
+    /// wrapper of <c>Bindings/Cpp</c>, whose CMake file asks for the library.
+    /// </param>
     /// <returns>The files, with paths relative to the output directory.</returns>
     /// <exception cref="CppGenException">Thrown when the ABI does not have what the wrapper uses.</exception>
-    public static IReadOnlyList<GeneratedFile> Generate(AbiModel model)
+    public static IReadOnlyList<GeneratedFile> Generate(AbiModel model, NativePackage? package = null)
     {
         return new[]
         {
@@ -43,7 +47,7 @@ internal static class CppBindingGenerator
             new GeneratedFile($"{IncludeDirectory}/{ArrayViewHeaderEmitter.FileName}", ArrayViewHeaderEmitter.Emit(model)),
             new GeneratedFile($"{IncludeDirectory}/{ModelHeaderEmitter.FileName}", ModelHeaderEmitter.Emit(model)),
             new GeneratedFile($"{IncludeDirectory}/{ViewsHeaderEmitter.FileName}", ViewsHeaderEmitter.Emit(model)),
-            new GeneratedFile(CMakeEmitter.FileName, CMakeEmitter.Emit(model)),
+            new GeneratedFile(CMakeEmitter.FileName, CMakeEmitter.Emit(model, package)),
         };
     }
 

@@ -72,6 +72,28 @@ public sealed unsafe class UnmanagedConverterTests
     }
 
     /// <summary>
+    /// Free: releases the items of a partly filled array and skips the zeroed rest, which is how a failed copy cleans up.
+    /// </summary>
+    [Fact]
+    public void Free_ReleasesThePartlyFilledItemsOfAnArray()
+    {
+        var timing = SimaiParser.ParseChart("(120)1-3[8:1]*-5[8:1],".AsSpan()).NoteTimings[0];
+        var chart = new UnmanagedSimaiChart
+        {
+            noteTimings = UnmanagedConverter.AllocateZeroed<UnmanagedSimaiTimingPoint>(3),
+            noteTimingsLen = 3,
+        };
+        chart.noteTimings[0] = UnmanagedConverter.ToUnmanaged(timing);
+
+        Assert.Equal(0, chart.noteTimings[2].notesLen);
+        Assert.True(chart.noteTimings[2].notes is null);
+        chart.Free();
+
+        Assert.True(chart.noteTimings is null);
+        Assert.Equal(0, chart.noteTimingsLen);
+    }
+
+    /// <summary>
     /// Related note outside the timing point: is minus one.
     /// </summary>
     [Fact]
