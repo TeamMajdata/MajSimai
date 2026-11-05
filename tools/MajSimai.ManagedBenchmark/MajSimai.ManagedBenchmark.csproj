@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    BenchmarkDotNet benchmarks of the MajSimai parser. See the "Tests" section of README.md for how to run them; the
+    sample files come from MAJSIMAI_BENCHMARK_CORPUS or MAJSIMAI_SAMPLES_DIR. tools/benchmark-native.py runs the corpus
+    benchmarks next to cimai and the C++ wrapper. net8.0 is there for the tests and for the net8.0 runtime of
+    BenchmarkDotNet; net10.0 matches the native AOT package.
+  -->
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net10.0</TargetFrameworks>
+    <OutputType>Exe</OutputType>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>14</LangVersion>
+    <IsPackable>false</IsPackable>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <RootNamespace>MajSimai.ManagedBenchmark</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\MajSimai.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="MajSimai.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -239,6 +239,51 @@ print how often each diagnostic occurs.
 Set `MAJSIMAI_BENCHMARK=1` as well and run `-class "*ParserBenchmarkTests"` in Release to compare the speed of both
 parsers.
 
+`tools/MajSimai.ManagedBenchmark` measures the parser with [BenchmarkDotNet](https://benchmarkdotnet.org/), on the
+samples named by `MAJSIMAI_SAMPLES_DIR` (or by `MAJSIMAI_BENCHMARK_CORPUS`, a corpus file written by
+`tools/benchmark-native.py`). It takes the options of BenchmarkDotNet and runs every benchmark when no `--filter` is
+given:
+
+```bash
+MAJSIMAI_SAMPLES_DIR="Simai Test Samples" dotnet run -c Release --project tools/MajSimai.ManagedBenchmark -f net10.0 -- --filter "*FileParseBenchmarks*"
+MAJSIMAI_SAMPLES_DIR="Simai Test Samples" dotnet run -c Release --project tools/MajSimai.ManagedBenchmark -f net10.0 -- --filter "*FileParseBenchmarks*" --runtimes net10.0 nativeaot10.0
+```
+
+| Benchmark | One operation |
+|---|---|
+| `FileParseBenchmarks` | Parses one sample, the median, 99th percentile or largest by size (`Sample`) |
+| `CorpusParseBenchmarks` | Parses every sample. An operation takes seconds, so add `--strategy Monitoring --warmupCount 1 --iterationCount 5` or let BenchmarkDotNet choose the counts |
+
+Each class has two methods: `Parse` (`SimaiParser.Parse`, the baseline) and `ParseToNative` (`MajSimai_ParseWithTolerance`
+and `MajSimai_Free` called in-process: the parse and the copy into native memory that the C++ wrapper asks for). The
+memory diagnoser reports the managed memory allocated per operation. The benchmarks install a logger that keeps the
+levels of the default logger, because some lenient checks run only when their level is logged, but writes nothing.
+`--runtimes nativeaot10.0` needs the native AOT prerequisites (on Windows, the Visual Studio C++ build tools).
+
+To compare the speed of the [cimai](https://github.com/re-poem/cimai) C parser, the C# parser and the C++ wrapper on the
+samples, run `tools/benchmark-native.py`. It makes the package with `tools/build-cpp-package.py` (or takes
+`--package`), builds `tools/NativeBenchmark` with CMake (cimai from the sources of `--cimai`), runs each native parser
+over the samples in memory in its own process, and runs `CorpusParseBenchmarks` with BenchmarkDotNet on net10.0 with
+the same warm-up and measured runs:
+
+```bash
+python tools/benchmark-native.py --cimai path/to/cimai --samples "Simai Test Samples" --kind shared --iterations 10
+```
+
+| Run | What is measured |
+|---|---|
+| `cimai` | `cimai_parse` and `cimai_file_release` |
+| `majsimai-cs` | `SimaiParser.Parse` on the .NET runtime, called the way the native entry point calls it |
+| `majsimai-cs-native-abi` | `MajSimai_ParseWithTolerance` and `MajSimai_Free` called in-process on the .NET runtime |
+| `majsimai-cpp-view` | `SimaiParser::ParseAsView`: the parser compiled with native AOT, and the copy into native memory |
+| `majsimai-cpp-model` | `SimaiParser::Parse`: as above, then a copy into `std::string` and `std::vector` |
+
+The table and `report.md`/`report.json` in `artifacts/benchmark/<kind>` give the median time of a run over every file
+and the throughput; the native rows add per-file percentiles, the C# rows the memory allocated per run (BenchmarkDotNet
+writes its own reports to `artifacts/benchmark/<kind>/bdn/results`). `--parsers` picks the runs (the C# runs need
+neither CMake nor cimai) and `--limit N` uses only the first N files for a quick check. On Windows the native runs need
+the Visual Studio C++ build tools; CMake is taken from the path or from Visual Studio.
+
 The C++ wrapper tests compile `Bindings/Cpp` with the compiler in `CXX` or the first of `c++`, `g++` and `clang++` on the
 path, and are skipped without one; they also check that code misusing the owner of a result does not compile. To also
 link a package with CMake and compare its results with the C# parser in lenient and strict mode (with
