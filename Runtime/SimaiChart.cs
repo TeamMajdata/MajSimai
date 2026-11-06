@@ -139,9 +139,11 @@ public sealed class SimaiChart
     /// Gets the MD5 hash of the chart text as a lowercase hex string.
     /// </summary>
     /// <remarks>
-    /// The text is hashed as one line: every white-space character (<see cref="char.IsWhiteSpace(char)"/>), line breaks
-    /// included, is removed, and the UTF-8 bytes of what is left are hashed. Charts that differ only in white space have
-    /// the same hash. The hash is computed on first access, which is thread safe.
+    /// The text is hashed as one line without comments: every <c>||</c> comment, from the <c>||</c> up to the end of its
+    /// line, is removed first; then every white-space character (<see cref="char.IsWhiteSpace(char)"/>), spaces, tabs
+    /// and line breaks included, is removed; and the UTF-8 bytes of what is left are hashed. Charts that differ only in
+    /// comments or white space have the same hash; <c>||s3/4</c> time signatures are comments too. The hash is computed
+    /// on first access, which is thread safe.
     /// </remarks>
     public string Md5 => GetHashes().Md5;
 
@@ -149,8 +151,8 @@ public sealed class SimaiChart
     /// Gets the SHA-256 hash of the chart text as a lowercase hex string.
     /// </summary>
     /// <remarks>
-    /// The text is hashed the same way as for <see cref="Md5"/>: as one line without white space, in UTF-8. The hash is
-    /// computed on first access, which is thread safe.
+    /// The text is hashed the same way as for <see cref="Md5"/>: as one line without comments and white space, in UTF-8.
+    /// The hash is computed on first access, which is thread safe.
     /// </remarks>
     public string Sha256 => GetHashes().Sha256;
 
@@ -213,7 +215,7 @@ public sealed class SimaiChart
     /// Gets the hashes of the chart text, computing them on first use. When several threads race, all of them return
     /// the value that was stored first.
     /// </summary>
-    /// <returns>The hashes of <see cref="Fumen"/> without white space.</returns>
+    /// <returns>The hashes of <see cref="Fumen"/> without comments and white space.</returns>
     private ContentHashes GetHashes()
     {
         var hashes = Volatile.Read(ref _hashes);

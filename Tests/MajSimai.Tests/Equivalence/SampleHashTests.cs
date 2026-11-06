@@ -8,6 +8,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using MajSimai.Tests.Legacy;
+using MajSimai.Tests.Model;
 using Xunit;
 
 namespace MajSimai.Tests.Equivalence;
@@ -25,7 +26,7 @@ public sealed class SampleHashTests
     /// <summary>
     /// For every sample, <see cref="SimaiFile.Hash"/> and <see cref="SimaiMetadata.Hash"/> are the same as in 2.2.3,
     /// <c>Md5</c> is the same MD5 as <c>Hash</c> written in hex instead of Base64, <c>Sha256</c> is the SHA-256 of the
-    /// raw bytes, and each chart is hashed from its text without white space.
+    /// raw bytes, and each chart is hashed from its text without comments and white space.
     /// </summary>
     [Fact]
     public async Task Samples_HashesMatchLegacyParser()
@@ -107,7 +108,7 @@ public sealed class SampleHashTests
             for (var i = 0; i < file.Charts.Length; i++)
             {
                 var chart = file.Charts[i];
-                var text = Encoding.UTF8.GetBytes(new string(chart.Fumen.Where(c => !char.IsWhiteSpace(c)).ToArray()));
+                var text = Encoding.UTF8.GetBytes(HashTests.NormalizeFumen(chart.Fumen));
                 if (chart.Md5 != Hex(MD5.HashData(text)) || chart.Sha256 != Hex(SHA256.HashData(text)))
                 {
                     differences.Add($"{path}: chart {i + 1} hashes {chart.Md5} / {chart.Sha256} do not match its text");

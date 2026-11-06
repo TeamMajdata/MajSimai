@@ -3,6 +3,7 @@ using System.IO;
 using System.Linq;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using MajSimai.Utils;
 using Xunit;
@@ -79,6 +80,34 @@ public sealed class HashTests
     }
 
     /// <summary>
+    /// Content hashes: a chart text loses its <c>||</c> comments, each up to the end of its line, before white space is
+    /// removed, so the text after a comment's line break is kept.
+    /// </summary>
+    [Fact]
+    public void ContentHashes_FromFumenRemovesCommentsBeforeWhiteSpace()
+    {
+        var hashes = ContentHashes.FromFumen("(120){4}||intro 1,2,\r\n1,||note\n2, || spaced\r\n||s3/4\n3,E||end".AsSpan());
+        var expected = ContentHashes.FromText("(120){4}1,2,3,E".AsSpan());
+
+        Assert.Equal(expected.Md5, hashes.Md5);
+        Assert.Equal(expected.Sha256, hashes.Sha256);
+        Assert.Equal(EmptyMd5, ContentHashes.FromFumen("||only a comment".AsSpan()).Md5);
+        Assert.Equal(EmptyMd5, ContentHashes.FromFumen("||".AsSpan()).Md5);
+        Assert.Equal(EmptyMd5, ContentHashes.FromFumen("|| a\n\t|| b\r\n".AsSpan()).Md5);
+    }
+
+    /// <summary>
+    /// Content hashes: a single <c>|</c> does not start a comment and is hashed, and <c>|||</c> starts a comment.
+    /// </summary>
+    [Fact]
+    public void ContentHashes_FromFumenKeepsSinglePipe()
+    {
+        Assert.Equal(ContentHashes.FromText("1|2,".AsSpan()).Md5, ContentHashes.FromFumen("1 | 2,".AsSpan()).Md5);
+        Assert.Equal(ContentHashes.FromText("1,|".AsSpan()).Md5, ContentHashes.FromFumen("1,|".AsSpan()).Md5);
+        Assert.Equal(ContentHashes.FromText("1,2,".AsSpan()).Md5, ContentHashes.FromFumen("1,|||x\n2,".AsSpan()).Md5);
+    }
+
+    /// <summary>
     /// Chart: the hashes are lowercase hex of the UTF-8 single-line chart text.
     /// </summary>
     [Fact]
@@ -109,6 +138,38 @@ public sealed class HashTests
         Assert.Equal(compact.Sha256, spaced.Sha256);
         Assert.NotEqual(compact.Md5, different.Md5);
         Assert.NotEqual(compact.Sha256, different.Sha256);
+    }
+
+    /// <summary>
+    /// Chart: charts that differ only in comments have the same hashes, and the text is hashed without comments.
+    /// </summary>
+    [Fact]
+    public void Chart_IgnoresComments()
+    {
+        const string commented = "||intro\n(120){4}1,|| first bar\r\n2,3,\n||outro";
+        var compact = SimaiParser.ParseChart("(120){4}1,2,3,".AsSpan());
+        var withComments = SimaiParser.ParseChart(commented.AsSpan());
+        var expectedBytes = Encoding.UTF8.GetBytes(NormalizeFumen(commented));
+
+        Assert.Equal("(120){4}1,2,3,", NormalizeFumen(commented));
+        Assert.Equal(compact.Md5, withComments.Md5);
+        Assert.Equal(compact.Sha256, withComments.Sha256);
+        Assert.Equal(Md5Hex(expectedBytes), withComments.Md5);
+        Assert.Equal(Sha256Hex(expectedBytes), withComments.Sha256);
+    }
+
+    /// <summary>
+    /// File: the comments in a chart of a parsed file are not part of its hashes.
+    /// </summary>
+    [Fact]
+    public void File_ChartsHashTextWithoutComments()
+    {
+        const string file = "&title=t\r\n&inote_1=(120){4}|| comment\r\n1,2,\r\n||s3/4\r\n3,\r\n";
+        var parsed = SimaiParser.Parse(file.AsSpan(), "hash");
+        var expected = ContentHashes.FromText("(120){4}1,2,3,".AsSpan());
+
+        Assert.Equal(expected.Md5, parsed.Charts[0].Md5);
+        Assert.Equal(expected.Sha256, parsed.Charts[0].Sha256);
     }
 
     /// <summary>
@@ -282,6 +343,19 @@ public sealed class HashTests
         Assert.Equal((string.Empty, string.Empty), (fromSpans.Md5, fromSpans.Sha256));
         Assert.Equal((string.Empty, string.Empty), (defaultValue.Md5, defaultValue.Sha256));
         Assert.Equal(string.Empty, SimaiParser.Parse(fromSequences).Md5);
+    }
+
+    /// <summary>
+    /// Writes a chart text the way <see cref="SimaiChart.Md5"/> and <see cref="SimaiChart.Sha256"/> hash it, with a
+    /// separate implementation: <c>||</c> comments up to the end of their line are removed, then all white space.
+    /// </summary>
+    /// <param name="fumen">The chart text.</param>
+    /// <returns>The chart text without comments and white space.</returns>
+    internal static string NormalizeFumen(string fumen)
+    {
+        var withoutComments = Regex.Replace(fumen, @"\|\|[^\n]*", string.Empty);
+
+        return new string(withoutComments.Where(c => !char.IsWhiteSpace(c)).ToArray());
     }
 
     /// <summary>

@@ -95,24 +95,22 @@ internal sealed class ContentHashes
     }
 
     /// <summary>
-    /// Hashes a chart text as one line: every white-space character (<see cref="char.IsWhiteSpace(char)"/>), line breaks
-    /// included, is removed, and the UTF-8 bytes of what is left are hashed.
+    /// Hashes a chart text as one line without comments: every <c>||</c> comment, from the <c>||</c> up to the end of
+    /// its line, is removed first; then every white-space character (<see cref="char.IsWhiteSpace(char)"/>), spaces,
+    /// tabs and line breaks included, is removed; and the UTF-8 bytes of what is left are hashed.
     /// </summary>
+    /// <remarks>
+    /// Comments are removed before white space because a comment ends at a line break. A <c>||s3/4</c> time signature
+    /// is written as a comment, so it is removed as well. A single <c>|</c> does not start a comment and is kept.
+    /// </remarks>
     /// <param name="fumen">The chart text.</param>
-    /// <returns>The hashes of the chart text without white space.</returns>
+    /// <returns>The hashes of the chart text without comments and white space.</returns>
     public static ContentHashes FromFumen(ReadOnlySpan<char> fumen)
     {
         var chars = ArrayPool<char>.Shared.Rent(Math.Max(fumen.Length, 1));
         try
         {
-            var length = 0;
-            foreach (var c in fumen)
-            {
-                if (!char.IsWhiteSpace(c))
-                {
-                    chars[length++] = c;
-                }
-            }
+            var length = NormalizeFumen(fumen, chars);
 
             return FromText(chars.AsSpan(0, length));
         }
@@ -120,6 +118,49 @@ internal sealed class ContentHashes
         {
             ArrayPool<char>.Shared.Return(chars);
         }
+    }
+
+    /// <summary>
+    /// Writes a chart text without its <c>||</c> comments and white space, the text <see cref="FromFumen"/> hashes.
+    /// </summary>
+    /// <param name="fumen">The chart text.</param>
+    /// <param name="destination">Receives the normalized text; it must be at least as long as <paramref name="fumen"/>.</param>
+    /// <returns>The number of characters written to <paramref name="destination"/>.</returns>
+    private static int NormalizeFumen(ReadOnlySpan<char> fumen, Span<char> destination)
+    {
+        var length = 0;
+        for (var i = 0; i < fumen.Length; i++)
+        {
+            var c = fumen[i];
+            if (IsCommentStart(fumen, i))
+            {
+                var lineEnd = fumen.Slice(i).IndexOf('\n');
+                if (lineEnd == -1)
+                {
+                    break;
+                }
+                // Skip the comment and the line break that ends it, which is white space.
+                i += lineEnd;
+                continue;
+            }
+            if (!char.IsWhiteSpace(c))
+            {
+                destination[length++] = c;
+            }
+        }
+
+        return length;
+    }
+
+    /// <summary>
+    /// Checks whether a <c>||</c> comment starts at an index of a chart text.
+    /// </summary>
+    /// <param name="fumen">The chart text.</param>
+    /// <param name="index">The index to check.</param>
+    /// <returns><see langword="true"/> when the characters at <paramref name="index"/> and after it are both <c>|</c>.</returns>
+    private static bool IsCommentStart(ReadOnlySpan<char> fumen, int index)
+    {
+        return fumen[index] == '|' && index + 1 < fumen.Length && fumen[index + 1] == '|';
     }
 
     /// <summary>
